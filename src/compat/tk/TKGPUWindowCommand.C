@@ -252,6 +252,24 @@ int tg_window_command(Tcl_Interp *i,size_t n,char **a) {
         return tg_set_result(i,"",TG_OK);
     }
 #endif
+#ifdef TKGPU_X11_HOST
+    if((!strcmp(a[0],"focus")&&(n==2||(n==3&&!strcmp(a[1],"-force"))))||
+       ((!strcmp(a[0],"raise")||!strcmp(a[0],"lower"))&&n==2)) {
+        const char *path=n==3?a[2]:a[1];
+        tg_ui *u=tg_interp_ui(i);
+        tg_id id=tg_ui_find(u,path);
+        const tg_widget *g=tg_ui_get(u,id);
+        tg_window *w=tg_window_for_widget(i,path);
+        if(!g||!w) return error(i);
+        if(!strcmp(a[0],"focus")) {
+            if(!tg_x11_focus(w)||tg_ui_focus(u,id)!=TG_OK) return error(i);
+        } else {
+            if(g->id!=w->root) return -1;
+            if(!tg_x11_stack(w,!strcmp(a[0],"raise"))) return error(i);
+        }
+        return tg_set_result(i,"",TG_OK);
+    }
+#endif
     if(!strcmp(a[0],"grab")) {
         if(n==3&&(!strcmp(a[1],"set")||!strcmp(a[1],"release")||!strcmp(a[1],"status"))) {
             tg_window *w=tg_window_for_widget(i,a[2]); if(!w) return error(i);
@@ -277,7 +295,7 @@ int tg_window_command(Tcl_Interp *i,size_t n,char **a) {
         return tg_set_result(i,"",TG_OK);
     }
 #endif
-#if defined(_WIN32)||defined(TKGPU_COCOA)
+#if defined(_WIN32)||defined(TKGPU_COCOA)||defined(TKGPU_X11_HOST)
     if(!strcmp(a[1],"attributes")) {
         char result[128];
         if(n==3) { snprintf(result,sizeof result,"-alpha %.9g -topmost %d",w->alpha,w->topmost); return tg_set_result(i,result,TG_OK); }
@@ -333,16 +351,20 @@ int tg_window_command(Tcl_Interp *i,size_t n,char **a) {
                 if(alpha<1&&!SetLayeredWindowAttributes(hwnd,0,(BYTE)(alpha*255+0.5),LWA_ALPHA)) return error(i);
 #endif
                 InvalidateRect(hwnd,NULL,FALSE);
-#else
+#elif defined(TKGPU_COCOA)
                 if(!tg_cocoa_alpha(w,alpha)) return error(i);
+#else
+                if(!tg_x11_alpha(w,alpha)) return error(i);
 #endif
                 w->alpha=alpha;
             } else if(!strcmp(a[at],"-topmost")) {
                 int enabled; if(!bool_value(a[at+1],&enabled)) return error(i);
 #ifdef _WIN32
                 if(!SetWindowPos((HWND)w->native,enabled?HWND_TOPMOST:HWND_NOTOPMOST,0,0,0,0,SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE)) return error(i);
-#else
+#elif defined(TKGPU_COCOA)
                 if(!tg_cocoa_topmost(w,enabled)) return error(i);
+#else
+                if(!tg_x11_topmost(w,enabled)) return error(i);
 #endif
                 w->topmost=enabled;
             } else return error(i);

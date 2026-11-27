@@ -210,6 +210,15 @@ int tg_ui_apply_event(tg_ui *u,tg_event e,char *script,size_t cap) {
         }
         return 1;
     }
+    if(u->drag_tree) {
+        tg_widget *tree=tg_lookup(u,u->drag_tree);
+        if(!tree||e.kind==TG_FOCUS_OUT) u->drag_tree=0;
+        else if(e.kind==TG_POINTER_MOVE||e.kind==TG_POINTER_UP) {
+            int changed=tg_tree_resize(u,tree,1,e.x,e.y);
+            if(e.kind==TG_POINTER_UP) u->drag_tree=0;
+            return changed;
+        }
+    }
     int hover_changed=0;
     if(e.kind==TG_POINTER_MOVE) { hover_changed=u->hover!=e.target; u->hover=e.target; }
     int handled=tg_container_input(u,e,script,cap); if(handled>=0) return handled||hover_changed;
@@ -220,7 +229,7 @@ int tg_ui_apply_event(tg_ui *u,tg_event e,char *script,size_t cap) {
         u->pressed=0;
         if(w&&w->kind==TG_TEXT) { u->focus=w->id; u->entry_drag=w->id; int r=tg_document_click(w,e.x,e.y); if(r==2) (void)post_virtual(u,w->id,"Selection"); return r!=0; }
         if(w&&w->kind==TG_LISTBOX) { if(w->state!=TG_STATE_DISABLED) { u->focus=w->id; int ch=tg_listbox_click(w,e.x,e.y); if(ch) (void)post_virtual(u,w->id,"ListboxSelect"); return ch; } return 1; }
-        if(w&&w->kind==TG_TREEVIEW) { int ch=tg_tree_click(u,w,e.x,e.y); if(ch) (void)post_virtual(u,w->id,"TreeviewSelect"); return ch; }
+        if(w&&w->kind==TG_TREEVIEW) { if(tg_tree_resize(u,w,0,e.x,e.y)) { u->drag_tree=w->id; return 1; } int ch=tg_tree_click(u,w,e.x,e.y); if(ch) (void)post_virtual(u,w->id,"TreeviewSelect"); return ch; }
         if(w&&w->kind==TG_NOTEBOOK) return tg_notebook_click(u,w,e.x,e.y);
         if(w&&w->kind==TG_SPINBOX&&w->state!=TG_STATE_DISABLED&&e.x>=w->rect.x+w->rect.w-13&&e.x<w->rect.x+w->rect.w) {
             u->focus=w->id;

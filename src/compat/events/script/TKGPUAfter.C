@@ -102,7 +102,7 @@ static int wait_command(Tcl_Interp *i,size_t n,char **a) {
         if(visibility) { tg_window *w=tg_window_for_widget(i,name); if(!w) { cancelled=1; break; } if(!w->withdrawn) break; }
         if(variable?watch.changed:(!tg_ui_get(i->ui,id)||(id==1&&!Tk_MainWindow(i)))) break;
         if(i->disposing||(root&&!Tk_MainWindow(i))) { cancelled=1; break; }
-        if(!Tcl_DoOneEvent(TKGPU_DONT_WAIT)) tg_clock_sleep(5);
+        (void)Tcl_DoOneEvent(0);
     }
     i->event_pump_depth--;
     s->busy=saved_busy;

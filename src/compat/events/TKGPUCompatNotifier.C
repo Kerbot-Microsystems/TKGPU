@@ -41,7 +41,7 @@ int Tcl_WaitForEvent(const Tcl_Time *time) {
     }
     /* Native messages/file readiness are polled by their event sources.
        Waiting must not dispatch an application callback recursively. */
-    if(tg_window_pending()) shorten(&wait,10);
+    if(tg_window_pending()) shorten(&wait,4);
 #ifndef _WIN32
     if(s->file_count) shorten(&wait,10);
 #endif

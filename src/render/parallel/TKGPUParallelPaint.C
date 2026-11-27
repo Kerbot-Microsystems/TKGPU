@@ -2,7 +2,7 @@
 #include "TKGPUWorker.H"
 #include "../TKGPUFrameBufferInternal.H"
 #include <stdlib.h>
-enum { TG_MAX_PAINT_THREADS=64,TG_AUTO_MIN_PIXELS=65536,TG_AUTO_BAND_PIXELS=65536 };
+enum { TG_MAX_PAINT_THREADS=64,TG_AUTO_MIN_PIXELS=262144,TG_AUTO_BAND_PIXELS=262144 };
 struct tg_paint_pool { unsigned count; tg_worker *workers[TG_MAX_PAINT_THREADS-1]; };
 typedef struct { tg_canvas band; tg_band_paint paint; const void *context; int result; } job;
 static void run(void *p) { job *j=p; j->result=j->paint(j->context,&j->band); }

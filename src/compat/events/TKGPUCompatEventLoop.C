@@ -5,6 +5,9 @@
 #include "../tk/TKGPUWindow.H"
 #include "../../platform/time/TKGPUClock.H"
 #include "TKGPUEventSource.H"
+#ifdef TKGPU_X11_HOST
+#include <poll.h>
+#endif
 /* Posted events, timers, file/window readiness and idle callbacks. */
 int tg_do_one_event(int flags,int queued_flags) {
     int categories=flags&~TKGPU_DONT_WAIT;
@@ -58,13 +61,28 @@ int tg_do_one_event(int flags,int queued_flags) {
 #ifndef _WIN32
         if((categories&TKGPU_FILE_EVENTS)&&tg_file_pending(s)&&(wait<0||wait>10)) wait=10;
 #endif
-        if((categories&TKGPU_WINDOW_EVENTS)&&tg_window_pending()&&(wait<0||wait>10)) wait=10;
+        if((categories&TKGPU_WINDOW_EVENTS)&&tg_window_pending()&&(wait<0||wait>2)) wait=2;
         if(s->source_wait>=0&&(wait<0||s->source_wait<wait)) wait=s->source_wait;
         s->source_wait=-1;
         /* Clock can acquire the native global guard: never call it while holding mailbox. */
         tg_native_mutex_lock(s->mailbox);
         if(s->generation!=generation) { tg_native_mutex_unlock(s->mailbox); continue; }
         if(s->alerted) { s->alerted=0; tg_native_mutex_unlock(s->mailbox); return 0; }
+#ifdef TKGPU_X11_HOST
+        if((categories&TKGPU_WINDOW_EVENTS)&&wait!=0) {
+            tg_native_mutex_unlock(s->mailbox);
+            int fds[32],nfds=tg_window_x11_fds(fds,32);
+            if(nfds>0) {
+                struct pollfd pfds[32];
+                for(int k=0;k<nfds;k++) { pfds[k].fd=fds[k]; pfds[k].events=POLLIN; pfds[k].revents=0; }
+                int tmo=(wait<0||wait>10)?10:(int)wait;
+                (void)poll(pfds,(nfds_t)nfds,tmo);
+                continue;
+            }
+            tg_native_mutex_lock(s->mailbox);
+            if(s->generation!=generation) { tg_native_mutex_unlock(s->mailbox); continue; }
+        }
+#endif
         tg_native_condition_wait(s->wake,s->mailbox,wait);
         tg_native_mutex_unlock(s->mailbox);
     }

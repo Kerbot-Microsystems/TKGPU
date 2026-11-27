@@ -16,7 +16,8 @@ struct tg_tree {
     unsigned capacity,count,serial,focus;
     char columns[COLS][64],heading[COLS+1][128];
     unsigned nc;
-    int width[COLS+1];
+    int width[COLS+1],minwidth[COLS+1];
+    int drag_column,drag_x,drag_width;
     unsigned char col_anchor[COLS+1],head_anchor[COLS+1],col_stretch[COLS+1];
     char column_list[1024];
     int show_tree,show_head;
@@ -28,7 +29,7 @@ tg_tree *tg_tree_create(void) {
     tg_tree *t=calloc(1,sizeof *t); if(!t) return NULL;
     t->rows=calloc(16,sizeof *t->rows); if(!t->rows) { free(t); return NULL; }
     t->capacity=16; t->serial=1; t->show_tree=t->show_head=1;
-    for(unsigned k=0;k<=COLS;k++) { t->width[k]=100; t->col_stretch[k]=1; }
+    for(unsigned k=0;k<=COLS;k++) { t->width[k]=100; t->minwidth[k]=20; t->col_stretch[k]=1; }
     return t;
 }
 void tg_tree_destroy(tg_tree *t) { if(t) { free(t->rows); free(t); } }
@@ -557,6 +558,7 @@ int tg_tree_command(const tg_ui *u,tg_widget *w,size_t n,char **a,char *out,size
         if(n==3) return TG_OK;
         if(n==4) {
             if(!strcmp(op,"heading")&&!strcmp(a[3],"-text")) return result(out,cap,t->heading[k]);
+            if(!strcmp(op,"column")&&!strcmp(a[3],"-minwidth")) { int z=snprintf(out,cap,"%d",t->minwidth[k]); return z>=0&&(size_t)z<cap?TG_OK:TG_ERROR; }
             if(!strcmp(op,"column")&&!strcmp(a[3],"-width")) { int z=snprintf(out,cap,"%d",t->width[k]); return z>=0&&(size_t)z<cap?TG_OK:TG_ERROR; }
             return TG_OK;
         }
@@ -572,7 +574,8 @@ int tg_tree_command(const tg_ui *u,tg_widget *w,size_t n,char **a,char *out,size
                 if(!strcmp(a[j],"-width")&&integer(a[j+1],&width)) t->width[k]=width;
                 else if(!strcmp(a[j],"-anchor")) t->col_anchor[k]=parse_anchor(a[j+1]);
                 else if(!strcmp(a[j],"-stretch")&&boolean(a[j+1],&bval)) t->col_stretch[k]=(unsigned char)bval;
-                else if(!strcmp(a[j],"-minwidth")||!strcmp(a[j],"-id")) {}
+                else if(!strcmp(a[j],"-minwidth")&&integer(a[j+1],&width)) t->minwidth[k]=width;
+                else if(!strcmp(a[j],"-id")) {}
                 else return TG_ERROR;
             }
         }
@@ -617,6 +620,29 @@ static unsigned advance(const tg_tree *t,unsigned k,unsigned *depth) {
     if(t->rows[k].open&&t->rows[k].child) { (*depth)++; return t->rows[k].child; }
     while(k&&!t->rows[k].next) { k=t->rows[k].parent; if(*depth) (*depth)--; }
     return k?t->rows[k].next:0;
+}
+/* Drag state belongs to the tree; the UI captures its widget until release. */
+int tg_tree_resize(const tg_ui *u,tg_widget *w,int phase,int x,int y) {
+    tg_tree *t=w->tree; if(!t||w->state==TG_STATE_DISABLED) return 0;
+    if(phase==0) {
+        int hh=t->show_head?tree_head_height(tree_row_height(u,w)):0;
+        if(y<w->rect.y||y>=w->rect.y+hh) return 0;
+        int widths[COLS+1]; compute_col_widths(t,w->rect.w,widths);
+        int edge=w->rect.x-t->scroll_x;
+        for(unsigned k=t->show_tree?0:1;k<=t->nc;k++) {
+            edge+=widths[k];
+            if(abs(x-edge)<=5) {
+                /* Freeze displayed widths so stretched neighbours do not jump. */
+                for(unsigned j=t->show_tree?0:1;j<=t->nc;j++) t->width[j]=widths[j];
+                t->drag_column=(int)k; t->drag_x=x; t->drag_width=widths[k]; return 1;
+            }
+        }
+        return 0;
+    }
+    int width=t->drag_width+x-t->drag_x;
+    if(width<t->minwidth[t->drag_column]) width=t->minwidth[t->drag_column];
+    if(width>16384) width=16384;
+    t->width[t->drag_column]=width; return 1;
 }
 int tg_tree_click(const tg_ui *u,tg_widget *w,int x,int y) {
     tg_tree *t=w->tree; if(!t||w->state==TG_STATE_DISABLED) return 0;

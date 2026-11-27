@@ -102,6 +102,7 @@ int tg_ui_remove(tg_ui *u,tg_id id) {
         if(u->pressed==w->id) u->pressed=0;
         if(u->hover==w->id) u->hover=0;
         if(u->drag_scroll==w->id) u->drag_scroll=0;
+        if(u->drag_tree==w->id) u->drag_tree=0;
         if(u->dialog_capture==w->id) u->dialog_capture=0;
         if(u->choice_posted==w->id||u->choice_host==w->id) u->choice_posted=0;
         tg_widget *parent=tg_lookup(u,w->parent);

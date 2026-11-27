@@ -4,6 +4,7 @@
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
 #include <X11/cursorfont.h>
+#include "TKGPUX11Shm.H"
 #include "../../../widgets/TKGPUWidgetInternal.H"
 #include "../../../widgets/ttk/tree/TKGPUTree.H"
 #include "../../time/TKGPUClock.H"
@@ -11,7 +12,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-typedef struct { Display *display; Window window; Atom close; int width,height,exposed,grip,grip_x,grip_y,grip_w,grip_h; XImage *image; Pixmap frame; int frame_width,frame_height; int direct_rgb; XIM im; XIC ic; Cursor cursors[XC_num_glyphs]; unsigned cursor_shape; int pointer_x,pointer_y,pointer_valid,focus_pending,force_frame; uint64_t last_frame_ms,resize_until_ms,resize_batch_ms,geometry_ready_ms; } native;
+typedef struct {
+    Display *display; Window window; Atom close;
+    int width,height,exposed,grip,grip_x,grip_y,grip_w,grip_h;
+    tg_x11_presenter presenter; Pixmap frame; int frame_width,frame_height;
+    XIM im; XIC ic; Cursor cursors[XC_num_glyphs]; unsigned cursor_shape;
+    int pointer_x,pointer_y,pointer_valid,focus_pending,force_frame;
+    uint64_t last_frame_ms,resize_until_ms,resize_batch_ms,geometry_ready_ms;
+} native;
 static void update_cursor(tg_window *w,native *n) {
     if(!n->pointer_valid) return;
     tg_ui *u=tg_interp_ui(w->interp);
@@ -67,47 +75,28 @@ static uint32_t keysym_scalar(KeySym sym) {
     default: return 0;
     }
 }
-static unsigned long channel(unsigned value,unsigned long mask) {
-    if(!mask) return 0;
-    unsigned shift=0;
-    while(!(mask&1ul)) { mask>>=1; shift++; }
-    return (unsigned long)(((uint64_t)value*mask+127)/255)<<shift;
-}
-static int ensure_image(native *n,int width,int height) {
-    if(n->image&&n->image->width==width&&n->image->height==height) return 1;
-    int screen=DefaultScreen(n->display); Visual *visual=DefaultVisual(n->display,screen);
-    XImage *image=XCreateImage(n->display,visual,(unsigned)DefaultDepth(n->display,screen),
-                               ZPixmap,0,NULL,(unsigned)width,(unsigned)height,32,0);
-    if(!image) return 0;
-    if(image->bytes_per_line<=0||(size_t)image->bytes_per_line>SIZE_MAX/(size_t)height) {
-        XDestroyImage(image); return 0;
-    }
-    image->data=calloc((size_t)height,(size_t)image->bytes_per_line);
-    if(!image->data) { XDestroyImage(image); return 0; }
-    /* Only use a byte copy when both pixel layout and byte order match.
-       Other TrueColor visuals use XPutPixel's conversion path. */
-    uint32_t endian=1;
-    int order=*(const unsigned char *)&endian?LSBFirst:MSBFirst;
-    n->direct_rgb=image->bits_per_pixel==32&&image->byte_order==order&&
-        image->red_mask==0x00ff0000ul&&image->green_mask==0x0000ff00ul&&
-        image->blue_mask==0x000000fful&&(size_t)image->bytes_per_line>=(size_t)width*4;
-    if(n->image) XDestroyImage(n->image);
-    n->image=image; return 1;
-}
 static int paint(tg_window *w,native *n,int content_changed) {
     int width=tg_canvas_width(w->canvas),height=tg_canvas_height(w->canvas);
-    if(width<=0||height<=0||!ensure_image(n,width,height)) return 0;
+    if(width<=0||height<=0||!tg_x11_presenter_ensure(&n->presenter,n->display,width,height)) return 0;
     int screen=DefaultScreen(n->display);
-    XImage *image=n->image;
-    int full_upload=0;
-    if(!n->frame||n->frame_width!=width||n->frame_height!=height) {
-        Pixmap next=XCreatePixmap(n->display,n->window,(unsigned)width,(unsigned)height,(unsigned)DefaultDepth(n->display,screen));
+    XImage *image=tg_x11_presenter_image(&n->presenter);
+    int mapping_now=(w->map_pending&&!w->withdrawn);
+    int full_upload=mapping_now;
+
+    if(!n->frame||n->frame_width<width||n->frame_height<height||
+       n->frame_width>width*2+128||n->frame_height>height*2+128) {
+        int cap_w=(width+63)&~63;
+        int cap_h=(height+63)&~63;
+        if(cap_w<width) cap_w=width;
+        if(cap_h<height) cap_h=height;
+        if(cap_w>16384) cap_w=16384;
+        if(cap_h>16384) cap_h=16384;
+        Pixmap next=XCreatePixmap(n->display,n->window,(unsigned)cap_w,(unsigned)cap_h,(unsigned)DefaultDepth(n->display,screen));
         if(!next) return 0;
         if(n->frame) XFreePixmap(n->display,n->frame);
-        n->frame=next; n->frame_width=width; n->frame_height=height;
+        n->frame=next; n->frame_width=cap_w; n->frame_height=cap_h;
         full_upload=1;
     }
-    if(w->map_pending&&!w->withdrawn) full_upload=1;
 
     tg_rect damage={0,0,width,height};
     int has_damage=0;
@@ -129,26 +118,11 @@ static int paint(tg_window *w,native *n,int content_changed) {
     }
 
     if(has_damage) {
-        const uint32_t *p=tg_canvas_pixels(w->canvas);
-        int dx=damage.x,dy=damage.y,dw=damage.w,dh=damage.h;
-        if(n->direct_rgb) {
-            size_t row_bytes=(size_t)dw*sizeof *p;
-            for(int y=dy;y<dy+dh;y++) {
-                memcpy(image->data+(size_t)y*image->bytes_per_line+(size_t)dx*4,
-                       p+(size_t)y*width+dx,row_bytes);
-            }
-        } else for(int y=dy;y<dy+dh;y++) for(int x=dx;x<dx+dw;x++) {
-            uint32_t rgb=p[(size_t)y*width+x];
-            unsigned long pixel=channel((rgb>>16)&255,image->red_mask)|
-                channel((rgb>>8)&255,image->green_mask)|channel(rgb&255,image->blue_mask);
-            XPutPixel(image,x,y,pixel);
-        }
-        /* Upload only the damaged region offscreen, then copy to the window. */
-        XPutImage(n->display,n->frame,DefaultGC(n->display,screen),image,
-                  dx,dy,dx,dy,(unsigned)dw,(unsigned)dh);
+        tg_x11_presenter_upload(&n->presenter,n->display,n->frame,DefaultGC(n->display,screen),
+                                tg_canvas_pixels(w->canvas),width,damage);
     }
 
-    if(w->map_pending&&!w->withdrawn) {
+    if(mapping_now) {
         /* Supply the first complete frame as the window background before
            mapping, so the compositor never sees a default black rectangle. */
         XSetWindowBackgroundPixmap(n->display,n->window,n->frame);
@@ -157,8 +131,9 @@ static int paint(tg_window *w,native *n,int content_changed) {
            frame's background pixmap across newly exposed client space. */
         const tg_widget *root=tg_ui_get(tg_interp_ui(w->interp),w->root);
         uint32_t bg=root?root->bg:0xf0f2f5;
-        unsigned long background=channel((bg>>16)&255,image->red_mask)|
-            channel((bg>>8)&255,image->green_mask)|channel(bg&255,image->blue_mask);
+        unsigned long background=tg_x11_channel_pixel((bg>>16)&255,image->red_mask)|
+            tg_x11_channel_pixel((bg>>8)&255,image->green_mask)|
+            tg_x11_channel_pixel(bg&255,image->blue_mask);
         XSetWindowBackground(n->display,n->window,background);
         w->map_pending=0;
     }
@@ -175,6 +150,7 @@ int tg_window_open(tg_window *w) {
     native *n=calloc(1,sizeof *n); if(!n) return 0;
     n->display=XOpenDisplay(NULL);
     if(!n->display) { free(n); return 0; }
+    tg_x11_presenter_init(&n->presenter,n->display);
     int screen=DefaultScreen(n->display);
     if(DefaultVisual(n->display,screen)->class!=TrueColor) { XCloseDisplay(n->display); free(n); return 0; }
     n->width=640; n->height=480;
@@ -191,16 +167,19 @@ int tg_window_open(tg_window *w) {
     XSetClassHint(n->display,n->window,&class_hint);
     XStoreName(n->display,n->window,"tk");
     XSelectInput(n->display,n->window,ExposureMask|StructureNotifyMask|ButtonPressMask|ButtonReleaseMask|PointerMotionMask|LeaveWindowMask|KeyPressMask|KeyReleaseMask|FocusChangeMask);
-    n->im=XOpenIM(n->display,NULL,NULL,NULL);
-    if(n->im) {
-        n->ic=XCreateIC(n->im,XNInputStyle,XIMPreeditNothing|XIMStatusNothing,
-                        XNClientWindow,n->window,XNFocusWindow,n->window,NULL);
-        if(n->ic) {
-            long mask=0;
-            if(!XGetICValues(n->ic,XNFilterEvents,&mask,NULL)) {
-                XWindowAttributes attr;
-                if(XGetWindowAttributes(n->display,n->window,&attr))
-                    XSelectInput(n->display,n->window,attr.your_event_mask|mask);
+    const char *use_xim=getenv("TKGPU_XIM");
+    if(use_xim&&use_xim[0]=='1') {
+        n->im=XOpenIM(n->display,NULL,NULL,NULL);
+        if(n->im) {
+            n->ic=XCreateIC(n->im,XNInputStyle,XIMPreeditNothing|XIMStatusNothing,
+                            XNClientWindow,n->window,XNFocusWindow,n->window,NULL);
+            if(n->ic) {
+                long mask=0;
+                if(!XGetICValues(n->ic,XNFilterEvents,&mask,NULL)) {
+                    XWindowAttributes attr;
+                    if(XGetWindowAttributes(n->display,n->window,&attr))
+                        XSelectInput(n->display,n->window,attr.your_event_mask|mask);
+                }
             }
         }
     }
@@ -213,12 +192,12 @@ void tg_window_close_native(tg_window *w) {
     if(n&&n->frame) { XFreePixmap(n->display,n->frame); n->frame=0; }
     if(n) for(unsigned k=0;k<XC_num_glyphs;k++) if(n->cursors[k]) { XFreeCursor(n->display,n->cursors[k]); n->cursors[k]=0; }
     if(n&&n->window) { XDestroyWindow(n->display,n->window); n->window=0; XFlush(n->display); }
-    if(n&&n->image) { XDestroyImage(n->image); n->image=NULL; }
+    if(n) tg_x11_presenter_destroy(&n->presenter,n->display);
     w->alive=0;
 }
 void tg_window_free_native(tg_window *w) {
     native *n=w->native; if(!n) return;
-    tg_window_close_native(w); if(n->image) XDestroyImage(n->image);
+    tg_window_close_native(w); tg_x11_presenter_destroy(&n->presenter,n->display);
     XCloseDisplay(n->display); free(n); w->native=NULL;
 }
 static void flush_motion(tg_window *w,native *n,int *has_motion,int mx,int my,int mx_root,int my_root,unsigned mstate) {
@@ -236,19 +215,68 @@ static void flush_motion(tg_window *w,native *n,int *has_motion,int mx,int my,in
         n->grip=0;
         tg_window_input(w,TG_POINTER_MOVE,mx,my,0);
     }
+    update_cursor(w,n);
 }
 int tg_window_poll_native(tg_window *w) {
     native *n=w->native; if(!n||!n->window) return 0;
     uint64_t now=0; (void)tg_clock_now(&now);
-    int events=0,configured=0;
+    /* Coalesce pending ConfigureNotify before painting so we never present
+       a stale-size frame. */
+    XEvent geometry; int configured=0;
     int previous_width=n->width,previous_height=n->height;
+    while(XCheckTypedWindowEvent(n->display,n->window,ConfigureNotify,&geometry)) {
+        n->width=geometry.xconfigure.width; n->height=geometry.xconfigure.height;
+    }
+    configured=n->width!=previous_width||n->height!=previous_height;
+    if(configured) {
+        w->dirty=w->layout_dirty=1; n->resize_until_ms=now+150;
+        tg_window_input(w,TG_CONFIGURE,n->width,n->height,0);
+    }
+    if(w->map_pending&&!w->withdrawn) tg_window_fit_override(w);
+    /* Present immediately on resize/map/dirty so side panels snap to the
+       new window size on the very same frame, just like Win32 WM_PAINT. */
+    int painted=0;
+    tg_ui *scene=tg_interp_ui(w->interp);
+    uint64_t interval=now<n->resize_until_ms?33:0;
+    if(!w->withdrawn&&(w->map_pending||n->force_frame||
+       now-n->last_frame_ms>=interval)) {
+        if(w->dirty||w->layout_dirty||n->exposed||w->map_pending) {
+            (void)tg_window_select(w,n->width,n->height);
+            if(configured||!scene->len) {
+                uint64_t begin=now;
+                int content_changed=tg_window_refresh(w,n->width,n->height);
+                if((content_changed||n->exposed)&&paint(w,n,content_changed)) {
+                    n->exposed=0; n->force_frame=0; n->resize_batch_ms=0; painted=1;
+                    (void)tg_clock_now(&n->last_frame_ms);
+                    w->present_frames++; w->last_frame_us=(n->last_frame_ms-begin)*1000;
+                    w->present_time_us+=w->last_frame_us;
+                }
+            }
+        }
+    }
+    if(painted||configured) update_cursor(w,n);
+    if(n->focus_pending&&!w->withdrawn&&!w->map_pending) {
+        XWindowAttributes attributes;
+        if(XGetWindowAttributes(n->display,n->window,&attributes)&&attributes.map_state==IsViewable) {
+            XSetInputFocus(n->display,n->window,RevertToParent,CurrentTime);
+            n->focus_pending=0; XFlush(n->display);
+        }
+    }
+
+    int events=0;
     int has_motion=0,mx=0,my=0,mx_root=0,my_root=0;
     unsigned mstate=0;
+    int wheel_delta=0,wx=0,wy=0;
+    uint32_t wmods=0;
+    previous_width=n->width; previous_height=n->height; configured=0;
 
-    /* Drain a batch of X11 events first and coalesce MotionNotify/ConfigureNotify
-       bursts so dragging and resizing render smooth intermediate frames. */
+    /* Drain a batch of X11 events and coalesce MotionNotify/ConfigureNotify/Wheel bursts. */
     while(events<32&&XPending(n->display)) {
         XEvent e; XNextEvent(n->display,&e);
+        if(n->presenter.shm_completion_type&&e.type==n->presenter.shm_completion_type) {
+            if(n->presenter.in_flight>0) n->presenter.in_flight--;
+            continue;
+        }
         events++;
         if(n->ic&&XFilterEvent(&e,None)) continue;
         switch(e.type) {
@@ -282,17 +310,21 @@ int tg_window_poll_native(tg_window *w) {
             } else if(e.xbutton.button==Button4||e.xbutton.button==Button5) {
                 uint32_t mods=(e.xbutton.state&ShiftMask?TG_MOD_SHIFT:0)|
                     (e.xbutton.state&ControlMask?TG_MOD_CONTROL:0)|(e.xbutton.state&Mod1Mask?TG_MOD_ALT:0);
-                tg_window_input(w,TG_WHEEL,e.xbutton.x,e.xbutton.y,
-                    (uint32_t)(uint16_t)(int16_t)(e.xbutton.button==Button4?120:-120)|mods);
-            } else if(e.xbutton.button==Button1||e.xbutton.button==Button3)
-                tg_window_input(w,TG_POINTER_DOWN,e.xbutton.x,e.xbutton.y,e.xbutton.button==Button3?3u:1u);
+                wx=e.xbutton.x; wy=e.xbutton.y; wmods=mods;
+                wheel_delta+=(e.xbutton.button==Button4?120:-120);
+            } else if(e.xbutton.button==Button1||e.xbutton.button==Button2||e.xbutton.button==Button3) {
+                uint32_t btn=e.xbutton.button==Button3?3u:e.xbutton.button==Button2?2u:1u;
+                tg_window_input(w,TG_POINTER_DOWN,e.xbutton.x,e.xbutton.y,btn);
+            }
             break;
         }
         case ButtonRelease:
             flush_motion(w,n,&has_motion,mx,my,mx_root,my_root,mstate);
             if(n->grip&&e.xbutton.button==Button1) n->grip=0;
-            else if(e.xbutton.button==Button1||e.xbutton.button==Button3)
-                tg_window_input(w,TG_POINTER_UP,e.xbutton.x,e.xbutton.y,e.xbutton.button==Button3?3u:1u);
+            else if(e.xbutton.button==Button1||e.xbutton.button==Button2||e.xbutton.button==Button3) {
+                uint32_t btn=e.xbutton.button==Button3?3u:e.xbutton.button==Button2?2u:1u;
+                tg_window_input(w,TG_POINTER_UP,e.xbutton.x,e.xbutton.y,btn);
+            }
             break;
         case LeaveNotify:
             flush_motion(w,n,&has_motion,mx,my,mx_root,my_root,mstate);
@@ -343,41 +375,15 @@ int tg_window_poll_native(tg_window *w) {
         if(!n->window) break;
     }
     flush_motion(w,n,&has_motion,mx,my,mx_root,my_root,mstate);
-    if(!n->window) return events>0;
-
+    if(wheel_delta) {
+        if(wheel_delta>32760) wheel_delta=32760;
+        if(wheel_delta<-32760) wheel_delta=-32760;
+        tg_window_input(w,TG_WHEEL,wx,wy,(uint32_t)(uint16_t)(int16_t)wheel_delta|wmods);
+    }
+    if(!n->window) return events>0||painted;
     if(configured&&(n->width!=previous_width||n->height!=previous_height)) {
         w->dirty=w->layout_dirty=1; n->resize_until_ms=now+150;
         tg_window_input(w,TG_CONFIGURE,n->width,n->height,0);
-    }
-    if(w->map_pending&&!w->withdrawn) tg_window_fit_override(w);
-    /* Dispatch geometry/widget callbacks before presenting their new layout,
-       pacing intermediate frames at 30-60 FPS during active resize/drag. */
-    int painted=0;
-    tg_ui *scene=tg_interp_ui(w->interp);
-    uint64_t interval=now<n->resize_until_ms?33:16;
-    if(!w->withdrawn&&(w->map_pending||n->force_frame||
-       now-n->last_frame_ms>=interval)) {
-        if(w->dirty||w->layout_dirty||n->exposed||w->map_pending) {
-            (void)tg_window_select(w,n->width,n->height);
-            if(!scene->len) {
-                uint64_t begin=now;
-                int content_changed=tg_window_refresh(w,n->width,n->height);
-                if((content_changed||n->exposed)&&paint(w,n,content_changed)) {
-                    n->exposed=0; n->force_frame=0; n->resize_batch_ms=0; painted=1;
-                    (void)tg_clock_now(&n->last_frame_ms);
-                    w->present_frames++; w->last_frame_us=(n->last_frame_ms-begin)*1000;
-                    w->present_time_us+=w->last_frame_us;
-                }
-            }
-        }
-    }
-    update_cursor(w,n);
-    if(n->focus_pending&&!w->withdrawn&&!w->map_pending) {
-        XWindowAttributes attributes;
-        if(XGetWindowAttributes(n->display,n->window,&attributes)&&attributes.map_state==IsViewable) {
-            XSetInputFocus(n->display,n->window,RevertToParent,CurrentTime);
-            n->focus_pending=0; XFlush(n->display);
-        }
     }
     return events>0||painted;
 }
@@ -408,7 +414,11 @@ int tg_window_set_visible(tg_window *w,int visible) {
         if(XGetWindowAttributes(n->display,n->window,&attributes)&&attributes.map_state!=IsUnmapped&&!w->withdrawn) return 1;
         w->map_pending=1; w->dirty=w->layout_dirty=1; n->exposed=1;
     }
-    else { w->map_pending=0; n->focus_pending=0; XUnmapWindow(n->display,n->window); }
+    else {
+        w->map_pending=0; n->focus_pending=0; XUnmapWindow(n->display,n->window);
+        if(n->frame) { XFreePixmap(n->display,n->frame); n->frame=0; n->frame_width=0; n->frame_height=0; }
+        tg_x11_presenter_destroy(&n->presenter,n->display);
+    }
     XFlush(n->display); return 1;
 }
 
@@ -498,6 +508,10 @@ int tg_x11_focus(tg_window *w) {
     if(!XGetWindowAttributes(n->display,n->window,&attributes)) return 0;
     if(attributes.map_state==IsViewable) XSetInputFocus(n->display,n->window,RevertToParent,CurrentTime);
     XFlush(n->display); return 1;
+}
+int tg_x11_window_fd(const tg_window *w) {
+    const native *n=w?w->native:NULL;
+    return (n&&n->display)?ConnectionNumber(n->display):-1;
 }
 int tg_x11_stack(tg_window *w,int raised) {
     native *n=w?w->native:NULL; if(!n||!n->window) return 0;

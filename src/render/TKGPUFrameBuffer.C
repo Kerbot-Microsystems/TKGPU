@@ -101,9 +101,13 @@ void tg_canvas_mark_damage(tg_canvas *c,int x,int y,int w,int h) {
 int tg_canvas_resize(tg_canvas *c,int w,int h) {
     if(!c || c->borrowed || w<=0 || h<=0 || w>16384 || h>16384 ||
        (size_t)w>SIZE_MAX/sizeof(uint32_t)/(size_t)h) return TG_ERROR;
-    uint32_t *p=calloc((size_t)w*(size_t)h,sizeof(*p));
-    if(!p) return TG_ERROR;
-    free(c->p); c->p=p; c->w=w; c->h=h; c->damaged=0; c->y0=0; c->y1=h;
+    size_t need=(size_t)w*(size_t)h;
+    if(!c->p || need>c->cap || c->cap>need*2+65536u) {
+        uint32_t *p=malloc(need*sizeof(*p));
+        if(!p) return TG_ERROR;
+        free(c->p); c->p=p; c->cap=need;
+    }
+    c->w=w; c->h=h; c->damaged=0; c->y0=0; c->y1=h;
     tg_canvas_mark_damage(c,0,0,w,h); return TG_OK;
 }
 tg_canvas *tg_canvas_create(int w,int h) {

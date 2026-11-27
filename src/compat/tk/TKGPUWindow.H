@@ -51,6 +51,15 @@ int tg_window_limits(tg_window *);
 int tg_window_screen(tg_window *,int *,int *);
 int tg_window_origin(tg_window *,int *,int *);
 int tg_window_set_visible(tg_window *,int);
+#ifdef TKGPU_X11_HOST
+int tg_x11_alpha(tg_window *,double);
+int tg_x11_topmost(tg_window *,int);
+int tg_x11_focus(tg_window *);
+int tg_x11_stack(tg_window *,int);
+int tg_x11_client_size(tg_window *,int *,int *);
+int tg_x11_window_fd(const tg_window *);
+int tg_window_x11_fds(int *fds,int max_fds);
+#endif
 #ifdef TKGPU_COCOA
 int tg_cocoa_alpha(tg_window *,double);
 int tg_cocoa_topmost(tg_window *,int);

@@ -234,14 +234,34 @@ static void arrange(tg_ui *u,tg_id id,tg_rect area) {
         tg_rect q=w->request,r={area.x,area.y,0,0};
         if(vertical_pack(w->layout)) {
             int extra=w->pack_expand?expansion(u,order,siblings,k,1,free_area.h):0;
-            int height=min(q.h+(2*w->pack_pady+w->pack_pady_extra)+2*w->pack_ipady+extra,free_area.h);
+            int limit=free_area.h;
+            if(w->pack_expand) {
+                int reserved=0;
+                for(size_t j=k+1;j<siblings;j++) {
+                    const tg_widget *s=&u->items[order[j]];
+                    if(vertical_pack(s->layout)&&!s->pack_expand)
+                        reserved+=s->request.h+(2*s->pack_pady+s->pack_pady_extra)+2*s->pack_ipady;
+                }
+                limit=max(0,free_area.h-reserved);
+            }
+            int height=min(q.h+(2*w->pack_pady+w->pack_pady_extra)+2*w->pack_ipady+extra,limit);
             int bottom=w->layout==TG_PACK_BOTTOM;
             tg_rect parcel={free_area.x,bottom?free_area.y+free_area.h-height:free_area.y,free_area.w,height};
             if(!bottom) free_area.y+=height;
             free_area.h-=height; r=fit_pack(u,w,parcel);
         } else if(horizontal_pack(w->layout)) {
             int extra=w->pack_expand?expansion(u,order,siblings,k,0,free_area.w):0;
-            int width=min(q.w+(2*w->pack_padx+w->pack_padx_extra)+2*w->pack_ipadx+extra,free_area.w);
+            int limit=free_area.w;
+            if(w->pack_expand) {
+                int reserved=0;
+                for(size_t j=k+1;j<siblings;j++) {
+                    const tg_widget *s=&u->items[order[j]];
+                    if(horizontal_pack(s->layout)&&!s->pack_expand)
+                        reserved+=s->request.w+(2*s->pack_padx+s->pack_padx_extra)+2*s->pack_ipadx;
+                }
+                limit=max(0,free_area.w-reserved);
+            }
+            int width=min(q.w+(2*w->pack_padx+w->pack_padx_extra)+2*w->pack_ipadx+extra,limit);
             int right=w->layout==TG_PACK_RIGHT;
             tg_rect parcel={right?free_area.x+free_area.w-width:free_area.x,free_area.y,width,free_area.h};
             if(!right) free_area.x+=width;

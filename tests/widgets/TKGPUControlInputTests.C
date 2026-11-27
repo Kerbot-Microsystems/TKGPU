@@ -37,5 +37,20 @@ int main(void) {
     CHECK(tg_ui_apply_event(u,(tg_event){TG_POINTER_DOWN,scroll,5,80,0},script,sizeof script)&&!strcmp(script,".canvas yview scroll 1 pages"));
     CHECK(tg_ui_apply_event(u,(tg_event){TG_POINTER_DOWN,scroll,5,25,0},script,sizeof script));
     CHECK(tg_ui_remove(u,scroll)==TG_OK&&!u->drag_scroll);
+    tg_id tree_id=tg_ui_add(u,".tree",TG_TREEVIEW,NULL);
+    tg_widget *tree=tg_lookup(u,tree_id); CHECK(tree);
+    tree->rect=(tg_rect){10,10,200,180};
+    char *columns[]={".tree","configure","-columns","a b","-show","headings"};
+    CHECK(tg_ui_command(u,6,columns,result,sizeof result)==TG_OK);
+    char *column[]={".tree","column","a","-width","100","-minwidth","40","-stretch","0"};
+    CHECK(tg_ui_command(u,9,column,result,sizeof result)==TG_OK);
+    CHECK(tg_ui_apply_event(u,(tg_event){TG_POINTER_DOWN,tree_id,109,15,1},script,sizeof script));
+    CHECK(u->drag_tree==tree_id);
+    CHECK(tg_ui_apply_event(u,(tg_event){TG_POINTER_MOVE,0,159,15,0},script,sizeof script));
+    char *query[]={".tree","column","a","-width"};
+    CHECK(tg_ui_command(u,4,query,result,sizeof result)==TG_OK&&!strcmp(result,"150"));
+    CHECK(tg_ui_apply_event(u,(tg_event){TG_POINTER_UP,0,-400,15,1},script,sizeof script));
+    CHECK(!u->drag_tree);
+    CHECK(tg_ui_command(u,4,query,result,sizeof result)==TG_OK&&!strcmp(result,"40"));
     tg_ui_destroy(u); puts("button activation, UTF-8 indices, entry editing and focus passed"); return 0;
 }

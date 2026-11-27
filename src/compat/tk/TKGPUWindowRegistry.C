@@ -63,12 +63,17 @@ static void layout_idle(void *p) {
     tg_window *main=p;
     main->layout_idle=0;
     for(tg_window *w=windows;w;w=w->next) {
-        if(w->interp!=main->interp||w->owner!=self()||!w->alive) continue;
+        if(w->interp!=main->interp||w->owner!=self()||!w->alive||(w->withdrawn&&!w->map_pending)) continue;
         tg_window_fit_override(w);
         int width=w->requested_width,height=w->requested_height;
 #ifdef _WIN32
         RECT client;
         if(GetClientRect((HWND)w->native,&client)) { width=client.right; height=client.bottom; }
+#elif defined(TKGPU_X11_HOST)
+        /* The window manager may resize/clamp the requested geometry. Layout
+           and presentation must use the same live client size, or each idle
+           invalidation flips child geometry back and starts a redraw loop. */
+        (void)tg_x11_client_size(w,&width,&height);
 #endif
         if(width>0&&height>0) tg_window_select(w,width,height);
 #ifdef _WIN32
@@ -81,7 +86,7 @@ static void repaint_host(void *p,tg_id target) {
     const tg_widget *g=tg_ui_get(tg_interp_ui(main->interp),target);
     tg_window *w=g?tg_window_for_widget(main->interp,g->path):main;
     if(w&&w->alive) {
-        w->dirty=1;
+        w->dirty=1; w->layout_dirty=1;
         if(!main->layout_idle) main->layout_idle=tg_idle_add(layout_idle,main);
     }
 }
@@ -90,7 +95,7 @@ static void dirty_host(void *p) {
     if(!main->layout_idle) main->layout_idle=tg_idle_add(layout_idle,main);
     for(tg_window *w=windows;w;w=w->next) if(w->interp==main->interp&&w->owner==self()) {
         if(w->root!=1&&!tg_ui_get(tg_interp_ui(w->interp),w->root)) close_host(w);
-        w->dirty=1; w->layout_dirty=1;
+        if(!w->withdrawn||w->map_pending) { w->dirty=1; w->layout_dirty=1; }
     }
 }
 int Tk_Init(Tcl_Interp *i) {
@@ -218,11 +223,30 @@ int tg_window_dispatch(void) {
             if(tg_window_dispatch_close(w)) return 1;
             int dispatched=0;
             while(dispatched<32&&tg_interp_dispatch_input(w->interp)) dispatched++;
-            if(dispatched) return 1;
-            if(!w->layout_dirty&&tg_interp_dispatch_scroll(w->interp)) return 1;
+            int scrolled=!w->layout_dirty&&tg_interp_dispatch_scroll(w->interp);
+            if(dispatched||scrolled) {
+                if(w->dirty&&!w->withdrawn) (void)tg_window_poll_native(w);
+                return 1;
+            }
             tg_native_guard_lock();
         }
         w=w->next;
     }
     tg_native_guard_unlock(); return native_handled;
 }
+#ifdef TKGPU_X11_HOST
+int tg_window_x11_fds(int *fds,int max_fds) {
+    if(!fds||max_fds<=0) return 0;
+    Tcl_ThreadId owner=self();
+    int count=0;
+    tg_native_guard_lock();
+    for(tg_window *w=windows;w&&count<max_fds;w=w->next) {
+        if(w->owner==owner&&w->alive) {
+            int fd=tg_x11_window_fd(w);
+            if(fd>=0) fds[count++]=fd;
+        }
+    }
+    tg_native_guard_unlock();
+    return count;
+}
+#endif

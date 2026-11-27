@@ -30,176 +30,18 @@ static void emit(tg_canvas *c,tg_rect clip,int x,int y,int w,int h,
         }
     }
 }
-#endif
-#if defined(TKGPU_TEXT_PANGO)
-#include <pango/pangocairo.h>
-static int native(const char *text,int scale,int *width,int *height,
-                  tg_canvas *c,tg_rect clip,int x,int y,uint32_t rgb,
-                  size_t *byte,int *pixel,int hit,size_t selection_end,const char *font_spec,tg_visual_cursor *cursor) {
-    if(!valid(text,scale)) return TG_ERROR;
-    int rc=TG_ERROR;
-    PangoFontMap *map=pango_cairo_font_map_get_default();
-    if(!map) return TG_ERROR;
-    PangoContext *context=pango_font_map_create_context(map);
-    if(!context) return TG_ERROR;
-    PangoLayout *layout=pango_layout_new(context);
-    g_object_unref(context);
-    if(!layout) return TG_ERROR;
-    PangoFontDescription *font=pango_font_description_from_string("sans");
-    if(!font) { g_object_unref(layout); return TG_ERROR; }
-    double pixels=12.0*scale;
-    if(font_spec&&*font_spec) {
-        const char *cur=font_spec; char family[128],value[32];
-        if(tg_list_next(&cur,family,sizeof family)==1&&tg_list_next(&cur,value,sizeof value)==1) {
-            char *end; double points=strtod(value,&end);
-            if(*value&&!*end&&points!=0.0&&points>=-256.0&&points<=256.0) {
-                double dpi=pango_cairo_context_get_resolution(pango_layout_get_context(layout));
-                if(dpi<=0.0) dpi=96.0;
-                pixels=(points<0?-points:points*dpi/72.0)*scale;
-                pango_font_description_set_family(font,family);
-                while(tg_list_next(&cur,value,sizeof value)==1) {
-                    if(!strcmp(value,"bold")) pango_font_description_set_weight(font,PANGO_WEIGHT_BOLD);
-                    if(!strcmp(value,"italic")) pango_font_description_set_style(font,PANGO_STYLE_ITALIC);
-                }
-            }
-        }
-    }
-    pango_font_description_set_absolute_size(font,pixels*PANGO_SCALE);
-    pango_layout_set_font_description(layout,font);
-    pango_font_description_free(font);
-    pango_layout_set_text(layout,text,-1);
-    pango_layout_set_auto_dir(layout,TRUE);
-    pango_layout_set_single_paragraph_mode(layout,TRUE);
-    if(pango_layout_get_unknown_glyphs_count(layout)) goto done;
-    PangoRectangle ink,logical;
-    pango_layout_get_pixel_extents(layout,&ink,&logical);
-    int left=ink.x<logical.x?ink.x:logical.x,top=ink.y<logical.y?ink.y:logical.y;
-    int right=ink.x+ink.width>logical.x+logical.width?ink.x+ink.width:logical.x+logical.width;
-    int bottom=ink.y+ink.height>logical.y+logical.height?ink.y+ink.height:logical.y+logical.height;
-    int w=right-left,h=bottom-top;
-    if(!dimensions(w,h)) goto done;
-    if(c&&byte&&!pixel) {
-        PangoLayoutLine *line=pango_layout_get_line_readonly(layout,0);
-        int *ranges=NULL,nranges=0;
-        if(!line) goto done;
-        pango_layout_line_get_x_ranges(line,(int)*byte,(int)selection_end,&ranges,&nranges);
-        for(int k=0;k<nranges;k++) {
-            int a=PANGO_PIXELS(ranges[2*k])-left,b=PANGO_PIXELS(ranges[2*k+1])-left;
-            if(b>a) tg_raster_fill(c,clip,(tg_rect){x+a,y,b-a,h},rgb);
-        }
-        g_free(ranges);
-        *width=w; *height=h; rc=TG_OK; goto done;
-    }
-    if(byte&&pixel) {
-        if(hit==2||hit==3) {
-            int index=0,trailing=0,old=(int)*byte,old_trailing=0,weak=0;
-            if(cursor&&cursor->valid&&cursor->offset==*byte&&cursor->index<=strlen(text)) {
-                old=(int)cursor->index; old_trailing=cursor->trailing; weak=cursor->weak;
-            }
-            pango_layout_move_cursor_visually(layout,!weak,old,old_trailing,hit==2?-1:1,&index,&trailing);
-            /* Retain the raw cluster position, not just its normalized byte.
-               At the edge keep the exact previous affinity. */
-            if(index>=0&&index!=G_MAXINT&&index<=(int)strlen(text)) {
-                const char *at=text+index; int remain=trailing;
-                while(remain-->0&&*at) at=g_utf8_next_char(at);
-                *byte=(size_t)(at-text);
-                if(cursor) *cursor=(tg_visual_cursor){*byte,(size_t)index,trailing,weak,1};
-            }
-        } else if(hit) {
-            int index=0,trailing=0,px=*pixel;
-            if(px< -32768) px=-32768;
-            if(px>32768) px=32768;
-            pango_layout_xy_to_index(layout,(px+left)*PANGO_SCALE,0,&index,&trailing);
-            const char *at=text+index; int remain=trailing;
-            while(remain-->0&&*at) at=g_utf8_next_char(at);
-            *byte=(size_t)(at-text);
-            if(cursor) {
-                PangoRectangle strong,weak;
-                pango_layout_get_cursor_pos(layout,(int)*byte,&strong,&weak);
-                int s=PANGO_PIXELS(strong.x)-left,b=PANGO_PIXELS(weak.x)-left;
-                *cursor=(tg_visual_cursor){*byte,(size_t)index,trailing,abs(px-b)<abs(px-s),1};
-            }
-        } else {
-            PangoRectangle strong,weak;
-            pango_layout_get_cursor_pos(layout,(int)*byte,&strong,&weak);
-            int use_weak=cursor&&cursor->valid&&cursor->offset==*byte&&cursor->weak;
-            *pixel=PANGO_PIXELS(use_weak?weak.x:strong.x)-left;
-        }
-    }
-    if(c) {
-        cairo_surface_t *surface=cairo_image_surface_create(CAIRO_FORMAT_A8,w,h);
-        cairo_t *cr=cairo_create(surface);
-        cairo_set_source_rgba(cr,1,1,1,1);
-        cairo_move_to(cr,-left,-top);
-        pango_cairo_show_layout(cr,layout);
-        cairo_surface_flush(surface);
-        if(cairo_status(cr)==CAIRO_STATUS_SUCCESS&&cairo_surface_status(surface)==CAIRO_STATUS_SUCCESS) {
-            emit(c,clip,x,y,w,h,cairo_image_surface_get_data(surface),(size_t)cairo_image_surface_get_stride(surface),1,rgb);
-            rc=TG_OK;
-        }
-        cairo_destroy(cr); cairo_surface_destroy(surface);
-    } else rc=TG_OK;
-    if(rc==TG_OK) { *width=w; *height=h; }
-done:
-    g_object_unref(layout); return rc;
-}
-const char *tg_text_native_backend(void) { return "pango-cairo"; }
-#elif defined(TKGPU_TEXT_UNISCRIBE)
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <usp10.h>
-
-#ifdef TKGPU_WINDOWS_XP
-/* Recent MinGW import libraries route several ScriptString entry points to
-   GDI32. XP exports them from USP10, so resolve that system DLL explicitly. */
-#define XP_SCRIPT_POINTER(name) static __typeof__(&name) xp_##name
-XP_SCRIPT_POINTER(ScriptStringAnalyse);
-XP_SCRIPT_POINTER(ScriptStringFree);
-XP_SCRIPT_POINTER(ScriptStringOut);
-XP_SCRIPT_POINTER(ScriptString_pLogAttr);
-XP_SCRIPT_POINTER(ScriptString_pSize);
-XP_SCRIPT_POINTER(ScriptStringCPtoX);
-static volatile LONG xp_script_state;
-static int xp_script_init(void) {
-    if(InterlockedCompareExchange(&xp_script_state,1,0)==0) {
-        WCHAR path[MAX_PATH];
-        UINT n=GetSystemDirectoryW(path,MAX_PATH);
-        HMODULE module=NULL;
-        int ok=n>0&&n<MAX_PATH-12;
-        if(ok) { lstrcatW(path,L"\\usp10.dll"); module=LoadLibraryW(path); ok=module!=NULL; }
-#define XP_SCRIPT_LOAD(name) do { \
-        xp_##name=(__typeof__(&name))GetProcAddress(module,#name); \
-        if(!xp_##name) ok=0; \
-    } while(0)
-        if(module) {
-            XP_SCRIPT_LOAD(ScriptStringAnalyse);
-            XP_SCRIPT_LOAD(ScriptStringFree);
-            XP_SCRIPT_LOAD(ScriptStringOut);
-            XP_SCRIPT_LOAD(ScriptString_pLogAttr);
-            XP_SCRIPT_LOAD(ScriptString_pSize);
-            XP_SCRIPT_LOAD(ScriptStringCPtoX);
-            if(!ok) FreeLibrary(module);
-        }
-        InterlockedExchange(&xp_script_state,ok?2:3);
-    } else {
-        while(InterlockedCompareExchange(&xp_script_state,1,1)==1) Sleep(0);
-    }
-    return InterlockedCompareExchange(&xp_script_state,2,2)==2;
-}
-#define ScriptStringAnalyse xp_ScriptStringAnalyse
-#define ScriptStringFree xp_ScriptStringFree
-#define ScriptStringOut xp_ScriptStringOut
-#define ScriptString_pLogAttr xp_ScriptString_pLogAttr
-#define ScriptString_pSize xp_ScriptString_pSize
-#define ScriptStringCPtoX xp_ScriptStringCPtoX
-#endif
-enum { TEXT_CACHE_CAP=4096 };
+enum { TEXT_CACHE_CAP=2048 };
 typedef struct {
     uint64_t hash,stamp;
     int scale,w,h;
     char *text,*spec;
     unsigned char *mask;
 } text_cache_entry;
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
 #ifdef TKGPU_WINDOWS_XP
 /* XP has Uniscribe, but SRW locks were introduced with Vista. */
 static CRITICAL_SECTION g_text_cache_lock;
@@ -223,6 +65,14 @@ static SRWLOCK g_text_cache_lock=SRWLOCK_INIT;
 #define TEXT_CACHE_WRITE_LOCK() AcquireSRWLockExclusive(&g_text_cache_lock)
 #define TEXT_CACHE_READ_UNLOCK() ReleaseSRWLockShared(&g_text_cache_lock)
 #define TEXT_CACHE_WRITE_UNLOCK() ReleaseSRWLockExclusive(&g_text_cache_lock)
+#endif
+#else
+#include <pthread.h>
+static pthread_mutex_t g_text_cache_lock=PTHREAD_MUTEX_INITIALIZER;
+#define TEXT_CACHE_READ_LOCK() pthread_mutex_lock(&g_text_cache_lock)
+#define TEXT_CACHE_WRITE_LOCK() pthread_mutex_lock(&g_text_cache_lock)
+#define TEXT_CACHE_READ_UNLOCK() pthread_mutex_unlock(&g_text_cache_lock)
+#define TEXT_CACHE_WRITE_UNLOCK() pthread_mutex_unlock(&g_text_cache_lock)
 #endif
 static text_cache_entry g_text_cache[TEXT_CACHE_CAP];
 static uint64_t g_text_cache_clock=1;
@@ -292,6 +142,199 @@ static void text_cache_store(const char *text,const char *spec,int scale,int w,i
     slot->text=tcopy; slot->spec=scopy; slot->mask=mcopy;
     TEXT_CACHE_WRITE_UNLOCK();
 }
+#endif
+#if defined(TKGPU_TEXT_PANGO)
+#include <pango/pangocairo.h>
+static pthread_mutex_t g_pango_lock=PTHREAD_MUTEX_INITIALIZER;
+static PangoLayout *g_pango_layout=NULL;
+static char g_pango_font_spec[256];
+static int g_pango_font_scale=0;
+static int native(const char *text,int scale,int *width,int *height,
+                  tg_canvas *c,tg_rect clip,int x,int y,uint32_t rgb,
+                  size_t *byte,int *pixel,int hit,size_t selection_end,const char *font_spec,tg_visual_cursor *cursor) {
+    if(!valid(text,scale)) return TG_ERROR;
+    if(!byte&&!pixel&&text_cache_lookup(text,font_spec,scale,width,height,c,clip,x,y,rgb)) return TG_OK;
+    pthread_mutex_lock(&g_pango_lock);
+    int rc=TG_ERROR;
+    if(!g_pango_layout) {
+        PangoFontMap *map=pango_cairo_font_map_get_default();
+        if(!map) { pthread_mutex_unlock(&g_pango_lock); return TG_ERROR; }
+        PangoContext *context=pango_font_map_create_context(map);
+        if(!context) { pthread_mutex_unlock(&g_pango_lock); return TG_ERROR; }
+        g_pango_layout=pango_layout_new(context);
+        g_object_unref(context);
+        if(!g_pango_layout) { pthread_mutex_unlock(&g_pango_lock); return TG_ERROR; }
+        pango_layout_set_auto_dir(g_pango_layout,TRUE);
+        pango_layout_set_single_paragraph_mode(g_pango_layout,TRUE);
+    }
+    PangoLayout *layout=g_pango_layout;
+    const char *spec=font_spec?font_spec:"";
+    if(g_pango_font_scale!=scale||strncmp(g_pango_font_spec,spec,sizeof g_pango_font_spec)!=0) {
+        PangoFontDescription *font=pango_font_description_from_string("sans");
+        if(!font) { pthread_mutex_unlock(&g_pango_lock); return TG_ERROR; }
+        double pixels=12.0*scale;
+        if(*spec) {
+            const char *cur=spec; char family[128],value[32];
+            if(tg_list_next(&cur,family,sizeof family)==1&&tg_list_next(&cur,value,sizeof value)==1) {
+                char *end; double points=strtod(value,&end);
+                if(*value&&!*end&&points!=0.0&&points>=-256.0&&points<=256.0) {
+                    double dpi=pango_cairo_context_get_resolution(pango_layout_get_context(layout));
+                    if(dpi<=0.0) dpi=96.0;
+                    pixels=(points<0?-points:points*dpi/72.0)*scale;
+                    pango_font_description_set_family(font,family);
+                    while(tg_list_next(&cur,value,sizeof value)==1) {
+                        if(!strcmp(value,"bold")) pango_font_description_set_weight(font,PANGO_WEIGHT_BOLD);
+                        if(!strcmp(value,"italic")) pango_font_description_set_style(font,PANGO_STYLE_ITALIC);
+                    }
+                }
+            }
+        }
+        pango_font_description_set_absolute_size(font,pixels*PANGO_SCALE);
+        pango_layout_set_font_description(layout,font);
+        pango_font_description_free(font);
+        snprintf(g_pango_font_spec,sizeof g_pango_font_spec,"%s",spec);
+        g_pango_font_scale=scale;
+    }
+    pango_layout_set_text(layout,text,-1);
+    if(pango_layout_get_unknown_glyphs_count(layout)) goto done;
+    PangoRectangle ink,logical;
+    pango_layout_get_pixel_extents(layout,&ink,&logical);
+    int left=ink.x<logical.x?ink.x:logical.x,top=ink.y<logical.y?ink.y:logical.y;
+    int right=ink.x+ink.width>logical.x+logical.width?ink.x+ink.width:logical.x+logical.width;
+    int bottom=ink.y+ink.height>logical.y+logical.height?ink.y+ink.height:logical.y+logical.height;
+    int w=right-left,h=bottom-top;
+    if(!dimensions(w,h)) goto done;
+    if(c&&byte&&!pixel) {
+        PangoLayoutLine *line=pango_layout_get_line_readonly(layout,0);
+        int *ranges=NULL,nranges=0;
+        if(!line) goto done;
+        pango_layout_line_get_x_ranges(line,(int)*byte,(int)selection_end,&ranges,&nranges);
+        for(int k=0;k<nranges;k++) {
+            int a=PANGO_PIXELS(ranges[2*k])-left,b=PANGO_PIXELS(ranges[2*k+1])-left;
+            if(b>a) tg_raster_fill(c,clip,(tg_rect){x+a,y,b-a,h},rgb);
+        }
+        g_free(ranges);
+        *width=w; *height=h; rc=TG_OK; goto done;
+    }
+    if(byte&&pixel) {
+        if(hit==2||hit==3) {
+            int index=0,trailing=0,old=(int)*byte,old_trailing=0,weak=0;
+            if(cursor&&cursor->valid&&cursor->offset==*byte&&cursor->index<=strlen(text)) {
+                old=(int)cursor->index; old_trailing=cursor->trailing; weak=cursor->weak;
+            }
+            pango_layout_move_cursor_visually(layout,!weak,old,old_trailing,hit==2?-1:1,&index,&trailing);
+            /* Retain the raw cluster position, not just its normalized byte.
+               At the edge keep the exact previous affinity. */
+            if(index>=0&&index!=G_MAXINT&&index<=(int)strlen(text)) {
+                const char *at=text+index; int remain=trailing;
+                while(remain-->0&&*at) at=g_utf8_next_char(at);
+                *byte=(size_t)(at-text);
+                if(cursor) *cursor=(tg_visual_cursor){*byte,(size_t)index,trailing,weak,1};
+            }
+        } else if(hit) {
+            int index=0,trailing=0,px=*pixel;
+            if(px< -32768) px=-32768;
+            if(px>32768) px=32768;
+            pango_layout_xy_to_index(layout,(px+left)*PANGO_SCALE,0,&index,&trailing);
+            const char *at=text+index; int remain=trailing;
+            while(remain-->0&&*at) at=g_utf8_next_char(at);
+            *byte=(size_t)(at-text);
+            if(cursor) {
+                PangoRectangle strong,weak;
+                pango_layout_get_cursor_pos(layout,(int)*byte,&strong,&weak);
+                int s=PANGO_PIXELS(strong.x)-left,b=PANGO_PIXELS(weak.x)-left;
+                *cursor=(tg_visual_cursor){*byte,(size_t)index,trailing,abs(px-b)<abs(px-s),1};
+            }
+        } else {
+            PangoRectangle strong,weak;
+            pango_layout_get_cursor_pos(layout,(int)*byte,&strong,&weak);
+            int use_weak=cursor&&cursor->valid&&cursor->offset==*byte&&cursor->weak;
+            *pixel=PANGO_PIXELS(use_weak?weak.x:strong.x)-left;
+        }
+    }
+    if(c) {
+        cairo_surface_t *surface=cairo_image_surface_create(CAIRO_FORMAT_A8,w,h);
+        cairo_t *cr=cairo_create(surface);
+        cairo_set_source_rgba(cr,1,1,1,1);
+        cairo_move_to(cr,-left,-top);
+        pango_cairo_show_layout(cr,layout);
+        cairo_surface_flush(surface);
+        if(cairo_status(cr)==CAIRO_STATUS_SUCCESS&&cairo_surface_status(surface)==CAIRO_STATUS_SUCCESS) {
+            const unsigned char *sdata=cairo_image_surface_get_data(surface);
+            size_t sstride=(size_t)cairo_image_surface_get_stride(surface);
+            emit(c,clip,x,y,w,h,sdata,sstride,1,rgb);
+            if(!byte&&!pixel) {
+                if(sstride==(size_t)w) {
+                    text_cache_store(text,font_spec,scale,w,h,sdata);
+                } else if((size_t)w*(size_t)h<=262144u) {
+                    unsigned char *packed=malloc((size_t)w*(size_t)h);
+                    if(packed) {
+                        for(int row=0;row<h;row++) memcpy(packed+(size_t)row*w,sdata+(size_t)row*sstride,(size_t)w);
+                        text_cache_store(text,font_spec,scale,w,h,packed);
+                        free(packed);
+                    }
+                }
+            }
+            rc=TG_OK;
+        }
+        cairo_destroy(cr); cairo_surface_destroy(surface);
+    } else {
+        if(!byte&&!pixel) text_cache_store(text,font_spec,scale,w,h,NULL);
+        rc=TG_OK;
+    }
+    if(rc==TG_OK) { *width=w; *height=h; }
+done:
+    pthread_mutex_unlock(&g_pango_lock);
+    return rc;
+}
+const char *tg_text_native_backend(void) { return "pango-cairo"; }
+#elif defined(TKGPU_TEXT_UNISCRIBE)
+#include <usp10.h>
+
+#ifdef TKGPU_WINDOWS_XP
+/* Recent MinGW import libraries route several ScriptString entry points to
+   GDI32. XP exports them from USP10, so resolve that system DLL explicitly. */
+#define XP_SCRIPT_POINTER(name) static __typeof__(&name) xp_##name
+XP_SCRIPT_POINTER(ScriptStringAnalyse);
+XP_SCRIPT_POINTER(ScriptStringFree);
+XP_SCRIPT_POINTER(ScriptStringOut);
+XP_SCRIPT_POINTER(ScriptString_pLogAttr);
+XP_SCRIPT_POINTER(ScriptString_pSize);
+XP_SCRIPT_POINTER(ScriptStringCPtoX);
+static volatile LONG xp_script_state;
+static int xp_script_init(void) {
+    if(InterlockedCompareExchange(&xp_script_state,1,0)==0) {
+        WCHAR path[MAX_PATH];
+        UINT n=GetSystemDirectoryW(path,MAX_PATH);
+        HMODULE module=NULL;
+        int ok=n>0&&n<MAX_PATH-12;
+        if(ok) { lstrcatW(path,L"\\usp10.dll"); module=LoadLibraryW(path); ok=module!=NULL; }
+#define XP_SCRIPT_LOAD(name) do { \
+        xp_##name=(__typeof__(&name))GetProcAddress(module,#name); \
+        if(!xp_##name) ok=0; \
+    } while(0)
+        if(module) {
+            XP_SCRIPT_LOAD(ScriptStringAnalyse);
+            XP_SCRIPT_LOAD(ScriptStringFree);
+            XP_SCRIPT_LOAD(ScriptStringOut);
+            XP_SCRIPT_LOAD(ScriptString_pLogAttr);
+            XP_SCRIPT_LOAD(ScriptString_pSize);
+            XP_SCRIPT_LOAD(ScriptStringCPtoX);
+            if(!ok) FreeLibrary(module);
+        }
+        InterlockedExchange(&xp_script_state,ok?2:3);
+    } else {
+        while(InterlockedCompareExchange(&xp_script_state,1,1)==1) Sleep(0);
+    }
+    return InterlockedCompareExchange(&xp_script_state,2,2)==2;
+}
+#define ScriptStringAnalyse xp_ScriptStringAnalyse
+#define ScriptStringFree xp_ScriptStringFree
+#define ScriptStringOut xp_ScriptStringOut
+#define ScriptString_pLogAttr xp_ScriptString_pLogAttr
+#define ScriptString_pSize xp_ScriptString_pSize
+#define ScriptStringCPtoX xp_ScriptStringCPtoX
+#endif
 /* Distinct visual positions for both sides of a logical bidi boundary. */
 static int caret_stop(const WCHAR *wide,const SCRIPT_LOGATTR *attrs,int count,int cp) {
     return cp>=0&&cp<=count&&(!cp||cp==count||

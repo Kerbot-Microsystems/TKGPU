@@ -1,0 +1,6 @@
+/build/
+/tkgpu_shell
+/tkgpu_tests
+/*.exe
+/*.obj
+/*.o

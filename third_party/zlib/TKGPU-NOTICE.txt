@@ -1,0 +1,4 @@
+zlib 1.3.1, unmodified upstream source subset.
+Source: https://zlib.net/fossils/zlib-1.3.1.tar.gz
+Copyright and redistribution terms are in LICENSE and the source headers.
+TKGPU builds the codec statically with Z_SOLO and supplies allocation callbacks.

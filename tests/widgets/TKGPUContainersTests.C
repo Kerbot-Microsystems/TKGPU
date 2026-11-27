@@ -1,0 +1,144 @@
+#include "TKGPUUi.H"
+#include "../../src/render/async/TKGPUSnapshot.H"
+#include "../../src/widgets/ttk/TKGPUContainers.H"
+#include <stdio.h>
+#include <string.h>
+#define CHECK(x) do { if(!(x)) { fprintf(stderr,"FAIL %d: %s\n",__LINE__,#x); return 1; } } while(0)
+#define CALL(...) tg_ui_command(u,sizeof((char *[]){__VA_ARGS__})/sizeof(char *),(char *[]){__VA_ARGS__},out,sizeof out)
+static int cascade_regression(void) {
+    tg_ui *u=tg_ui_create(); CHECK(u); char out[512],script[512];
+    CHECK(CALL("menu",".m","-tearoff","0")==TG_OK);
+    CHECK(CALL("menu",".m.sub","-tearoff","0")==TG_OK);
+    CHECK(CALL("menu",".m.sub.deep","-tearoff","0")==TG_OK);
+    CHECK(CALL(".m","add","cascade","-label","File","-menu",".m.sub")==TG_OK);
+    CHECK(CALL(".m.sub","add","cascade","-label","More","-menu",".m.sub.deep")==TG_OK);
+    CHECK(CALL(".m.sub.deep","add","command","-label","Run","-command","set chosen 1")==TG_OK);
+    CHECK(CALL(".m","type","0")==TG_OK&&!strcmp(out,"cascade"));
+    CHECK(CALL(".m","entrycget","0","-menu")==TG_OK&&!strcmp(out,".m.sub"));
+    CHECK(CALL(".m","index","File")==TG_OK&&!strcmp(out,"0"));
+    CHECK(CALL(".m","index","active")==TG_OK&&!strcmp(out,"none"));
+    CHECK(tg_ui_arrange(u,640,300)==TG_OK);
+    tg_id m=tg_ui_find(u,".m"),sub=tg_ui_find(u,".m.sub"),deep=tg_ui_find(u,".m.sub.deep");
+    CHECK(CALL(".m","post","20","20")==TG_OK);
+    CHECK(CALL(".m","postcascade","0")==TG_OK);
+    CHECK(tg_ui_hit(u,185,25)==sub);
+    CHECK(tg_ui_apply_event(u,(tg_event){TG_POINTER_MOVE,sub,185,25,0},script,sizeof script));
+    CHECK(tg_ui_hit(u,345,25)==deep);
+    tg_canvas *x=tg_canvas_create(640,300),*y=tg_canvas_create(640,300); CHECK(x&&y);
+    CHECK(tg_ui_paint(u,x)==TG_OK&&tg_ui_paint_parallel(u,y,4,NULL)==TG_OK);
+    CHECK(!memcmp(tg_canvas_pixels(x),tg_canvas_pixels(y),640u*300u*4u));
+    tg_ui *copy=tg_snapshot_create(u); CHECK(copy&&tg_ui_hit(copy,345,25)==deep);
+    CHECK(tg_ui_apply_event(u,(tg_event){TG_POINTER_DOWN,deep,345,25,0},script,sizeof script)&&!strcmp(script,"set chosen 1"));
+    CHECK(tg_ui_hit(u,345,25)!=deep&&tg_ui_hit(copy,345,25)==deep);
+    CHECK(CALL(".m","post","460","20")==TG_OK&&CALL(".m","postcascade","0")==TG_OK);
+    CHECK(tg_ui_hit(u,305,25)==sub);
+    CHECK(CALL(".m","postcascade","none")==TG_OK&&tg_ui_hit(u,305,25)!=sub);
+    CHECK(CALL(".m","entryconfigure","0","-state","disabled")==TG_OK);
+    CHECK(CALL(".m","activate","0")==TG_OK&&CALL(".m","index","active")==TG_OK&&!strcmp(out,"none"));
+    CHECK(CALL(".m","postcascade","0")==TG_OK&&tg_ui_hit(u,305,25)!=sub);
+    CHECK(CALL(".m","entryconfigure","0","-state","normal")==TG_OK);
+    CHECK(CALL(".m","post","20","20")==TG_OK&&CALL(".m","activate","0")==TG_OK);
+    CHECK(tg_ui_apply_event(u,(tg_event){TG_KEY_DOWN,m,0,0,TG_KEY_RIGHT},script,sizeof script));
+    CHECK(tg_ui_hit(u,185,25)==sub);
+    CHECK(tg_ui_apply_event(u,(tg_event){TG_KEY_DOWN,sub,0,0,TG_KEY_RIGHT},script,sizeof script));
+    CHECK(tg_ui_hit(u,345,25)==deep);
+    CHECK(tg_ui_apply_event(u,(tg_event){TG_KEY_DOWN,deep,0,0,TG_KEY_RETURN},script,sizeof script)&&!strcmp(script,"set chosen 1"));
+    CHECK(CALL(".m","post","20","20")==TG_OK&&CALL(".m","postcascade","0")==TG_OK);
+    CHECK(CALL(".m.sub","entryconfigure","0","-menu",".m")==TG_OK);
+    CHECK(CALL(".m.sub","postcascade","0")==TG_ERROR);
+    CHECK(tg_ui_hit(u,345,25)!=deep);
+    CHECK(CALL("destroy",".m.sub")==TG_OK);
+    CHECK(tg_ui_hit(u,185,25)!=sub&&CALL(".m","postcascade","0")==TG_ERROR);
+    CHECK(CALL(".m","unpost")==TG_OK);
+    CHECK(tg_ui_paint_parallel(copy,y,4,NULL)==TG_OK&&!memcmp(tg_canvas_pixels(x),tg_canvas_pixels(y),640u*300u*4u));
+    tg_ui_destroy(copy); tg_canvas_destroy(x); tg_canvas_destroy(y); tg_ui_destroy(u); return 0;
+}
+static int pane_parity_regression(void) {
+    tg_ui *u=tg_ui_create(); CHECK(u); char out[512];
+    CHECK(CALL("ttk::panedwindow",".p","-orient","horizontal")==TG_OK);
+    CHECK(CALL("ttk::frame",".p.a")==TG_OK&&CALL("ttk::frame",".p.b")==TG_OK&&CALL("ttk::frame",".p.c")==TG_OK);
+    CHECK(CALL(".p","add",".p.a","-weight","1")==TG_OK);
+    CHECK(CALL(".p","add",".p.b","-weight","2")==TG_OK);
+    CHECK(CALL(".p","add",".p.a","-weight","3")==TG_ERROR);
+    CHECK(CALL(".p","pane",".p.a")==TG_OK&&!strcmp(out,"-weight 1"));
+    CHECK(CALL(".p","insert","end",".p.a")==TG_OK);
+    CHECK(CALL(".p","panes")==TG_OK&&!strcmp(out,".p.b .p.a"));
+    CHECK(CALL(".p","insert","0",".p.a")==TG_OK);
+    CHECK(CALL(".p","insert","2",".p.c")==TG_ERROR);
+    CHECK(CALL(".p","insert","end",".p.c")==TG_OK);
+    CHECK(CALL(".p","insert",".p.b",".p.a")==TG_OK);
+    CHECK(CALL(".p","panes")==TG_OK&&!strcmp(out,".p.b .p.a .p.c"));
+    CHECK(CALL(".p","pane",".p.a","-weight","-1")==TG_ERROR);
+    CHECK(CALL(".p","insert","0",".p.a","-weight","3","-bad","0")==TG_ERROR);
+    CHECK(CALL(".p","panes")==TG_OK&&!strcmp(out,".p.b .p.a .p.c"));
+    CHECK(CALL(".p","pane",".p.a","-weight")==TG_OK&&!strcmp(out,"1"));
+    CHECK(CALL(".p","pane",".p.a","-weight","3")==TG_OK);
+    CHECK(CALL(".p","pane","1")==TG_OK&&!strcmp(out,"-weight 3"));
+    CHECK(CALL("place",".p","-x","10","-y","5","-width","310","-height","100")==TG_OK);
+    CHECK(tg_ui_arrange(u,340,150)==TG_OK);
+    CHECK(CALL(".p","sashpos","0","100")==TG_OK&&!strcmp(out,"100"));
+    CHECK(CALL(".p","identify","101","20")==TG_OK&&!strcmp(out,"0"));
+    CHECK(CALL(".p","identify","20","20")==TG_OK&&!strcmp(out,""));
+    CHECK(CALL(".p","identify","101","-1")==TG_OK&&!strcmp(out,""));
+    CHECK(CALL(".p","forget","0")==TG_OK);
+    CHECK(CALL(".p","panes")==TG_OK&&!strcmp(out,".p.a .p.c"));
+    CHECK(CALL(".p","insert","end",".p.b")==TG_OK);
+    CHECK(CALL(".p","pane",".p.b","-weight")==TG_OK&&!strcmp(out,"0"));
+    tg_ui_destroy(u); return 0;
+}
+int main(void) {
+    CHECK(cascade_regression()==0);
+    CHECK(pane_parity_regression()==0);
+    tg_ui *u=tg_ui_create(); CHECK(u); char out[512],script[512];
+    CHECK(CALL("ttk::panedwindow",".p","-orient","horizontal")==TG_OK);
+    CHECK(CALL("ttk::frame",".p.a")==TG_OK&&CALL("ttk::frame",".p.b")==TG_OK);
+    CHECK(CALL(".p","add",".p.a","-weight","1")==TG_OK);
+    CHECK(CALL(".p","add",".p.b","-weight","2")==TG_OK);
+    CHECK(CALL(".p","panes")==TG_OK&&!strcmp(out,".p.a .p.b"));
+    CHECK(CALL("place",".p","-x","0","-y","0","-width","305","-height","100")==TG_OK);
+    CHECK(tg_ui_arrange(u,305,150)==TG_OK);
+    tg_id p=tg_ui_find(u,".p"),a=tg_ui_find(u,".p.a"),b=tg_ui_find(u,".p.b");
+    CHECK(tg_ui_get(u,a)->rect.w==100&&tg_ui_get(u,b)->rect.w==200);
+    CHECK(CALL(".p","sashpos","0","140")==TG_OK&&!strcmp(out,"140"));
+    CHECK(tg_ui_arrange(u,305,150)==TG_OK&&tg_ui_get(u,a)->rect.w==140);
+    CHECK(tg_ui_hit(u,142,20)==p);
+    CHECK(tg_ui_apply_event(u,(tg_event){TG_POINTER_DOWN,p,142,20,0},script,sizeof script));
+    CHECK(tg_ui_apply_event(u,(tg_event){TG_POINTER_MOVE,b,180,20,0},script,sizeof script));
+    CHECK(tg_ui_apply_event(u,(tg_event){TG_POINTER_UP,b,180,20,0},script,sizeof script));
+    CHECK(tg_ui_arrange(u,305,150)==TG_OK&&tg_ui_get(u,a)->rect.w==180);
+    CHECK(CALL("destroy",".p.a")==TG_OK&&CALL(".p","panes")==TG_OK&&!strcmp(out,".p.b"));
+    CHECK(tg_ui_arrange(u,305,150)==TG_OK&&tg_ui_get(u,b)->rect.w==305);
+    CHECK(CALL("menu",".m","-tearoff","0")==TG_OK);
+    CHECK(CALL(".m","add","command","-label","Run","-command","set x 1")==TG_OK);
+    CHECK(CALL(".m","add","separator")==TG_OK);
+    CHECK(CALL(".m","add","command","-label","Off","-state","disabled","-command","set x 2")==TG_OK);
+    CHECK(CALL(".m","index","end")==TG_OK&&!strcmp(out,"2"));
+    CHECK(CALL(".m","entryconfigure","0","-label","Updated","-state","disabled")==TG_OK);
+    CHECK(CALL(".m","entrycget","0","-label")==TG_OK&&!strcmp(out,"Updated"));
+    CHECK(CALL(".m","entryconfigure","0","-label","Bad","-unknown","value")==TG_ERROR);
+    CHECK(CALL(".m","entrycget","0","-label")==TG_OK&&!strcmp(out,"Updated"));
+    CHECK(CALL(".m","entryconfig","0","-label","Run","-state","normal")==TG_OK);
+    CHECK(CALL(".m","insert","1","command","-label","Temporary")==TG_OK);
+    CHECK(CALL(".m","insert","2","separator")==TG_OK);
+    CHECK(CALL(".m","type","2")==TG_OK&&!strcmp(out,"separator"));
+    CHECK(CALL(".m","delete","1","2")==TG_OK);
+    CHECK(CALL(".m","index","end")==TG_OK&&!strcmp(out,"2"));
+    CHECK(CALL(".m","type","1")==TG_OK&&!strcmp(out,"separator"));
+    CHECK(CALL("ttk::menubutton",".mb","-text","Actions","-menu",".m")==TG_OK);
+    CHECK(CALL("ttk::sizegrip",".g")==TG_OK);
+    CHECK(CALL("place",".mb","-x","0","-y","100","-width","100","-height","20")==TG_OK);
+    CHECK(CALL("place",".g","-x","289","-y","134","-width","16","-height","16")==TG_OK);
+    CHECK(tg_ui_arrange(u,305,150)==TG_OK);
+    tg_id mb=tg_ui_find(u,".mb"),m=tg_ui_find(u,".m");
+    CHECK(tg_ui_apply_event(u,(tg_event){TG_POINTER_DOWN,mb,10,110,0},script,sizeof script));
+    CHECK(tg_ui_hit(u,10,95)==m);
+    tg_canvas *x=tg_canvas_create(305,150),*y=tg_canvas_create(305,150); CHECK(x&&y);
+    CHECK(tg_ui_paint(u,x)==TG_OK&&tg_ui_paint_parallel(u,y,8,NULL)==TG_OK);
+    CHECK(!memcmp(tg_canvas_pixels(x),tg_canvas_pixels(y),305u*150u*4u));
+    tg_ui *snap=tg_snapshot_create(u); CHECK(snap);
+    CHECK(tg_ui_apply_event(u,(tg_event){TG_POINTER_DOWN,m,10,95,0},script,sizeof script)&&!strcmp(script,"set x 1"));
+    CHECK(CALL("destroy",".m")==TG_OK);
+    CHECK(tg_ui_paint_parallel(snap,y,4,NULL)==TG_OK&&!memcmp(tg_canvas_pixels(x),tg_canvas_pixels(y),305u*150u*4u));
+    tg_ui_destroy(snap); tg_canvas_destroy(x); tg_canvas_destroy(y); tg_ui_destroy(u);
+    puts("panes, sash drag, menu overlay, snapshot, sizegrip rendering passed"); return 0;
+}

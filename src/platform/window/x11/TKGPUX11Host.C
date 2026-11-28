@@ -513,6 +513,10 @@ int tg_x11_window_fd(const tg_window *w) {
     const native *n=w?w->native:NULL;
     return (n&&n->display)?ConnectionNumber(n->display):-1;
 }
+unsigned long tg_x11_window_id(const tg_window *w) {
+    const native *n=w?w->native:NULL;
+    return n?(unsigned long)n->window:0;
+}
 int tg_x11_stack(tg_window *w,int raised) {
     native *n=w?w->native:NULL; if(!n||!n->window) return 0;
     if(raised) XRaiseWindow(n->display,n->window); else XLowerWindow(n->display,n->window);

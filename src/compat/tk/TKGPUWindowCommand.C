@@ -253,6 +253,12 @@ int tg_window_command(Tcl_Interp *i,size_t n,char **a) {
     }
 #endif
 #ifdef TKGPU_X11_HOST
+    if(n==3&&!strcmp(a[0],"winfo")&&!strcmp(a[1],"id")) {
+        tg_window *w=tg_window_for_widget(i,a[2]); char b[64];
+        if(!w) return error(i);
+        snprintf(b,sizeof b,"0x%lx",tg_x11_window_id(w));
+        return tg_set_result(i,b,TG_OK);
+    }
     if((!strcmp(a[0],"focus")&&(n==2||(n==3&&!strcmp(a[1],"-force"))))||
        ((!strcmp(a[0],"raise")||!strcmp(a[0],"lower"))&&n==2)) {
         const char *path=n==3?a[2]:a[1];

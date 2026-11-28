@@ -58,6 +58,7 @@ int tg_x11_focus(tg_window *);
 int tg_x11_stack(tg_window *,int);
 int tg_x11_client_size(tg_window *,int *,int *);
 int tg_x11_window_fd(const tg_window *);
+unsigned long tg_x11_window_id(const tg_window *);
 int tg_window_x11_fds(int *fds,int max_fds);
 #endif
 #ifdef TKGPU_COCOA

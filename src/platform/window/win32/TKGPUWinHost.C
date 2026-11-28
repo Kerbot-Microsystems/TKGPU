@@ -35,6 +35,14 @@ static const WCHAR classname[]=L"TKGPU.Preview.MainWindow.Unicode";
 #define WM_UNICHAR 0x0109
 #endif
 #endif
+static HICON framework_icon(int width,int height) {
+    MEMORY_BASIC_INFORMATION region;
+    HINSTANCE module=GetModuleHandleA(NULL);
+    /* The host may be python.exe or another application. Resolve the module
+       containing TKGPU's own data without adding a newer Windows API import. */
+    if(VirtualQuery(classname,&region,sizeof region)) module=(HINSTANCE)region.AllocationBase;
+    return (HICON)LoadImageA(module,MAKEINTRESOURCEA(101),IMAGE_ICON,width,height,LR_SHARED);
+}
 static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
     tg_window *w=(tg_window *)(LONG_PTR)TG_GETUSER(hwnd,GWLP_USERDATA);
     if(msg==WM_NCCREATE) {
@@ -348,14 +356,16 @@ int tg_window_open(tg_window *w) {
 #endif
     wc.lpfnWndProc=procedure; wc.hInstance=instance; wc.lpszClassName=classname;
     wc.hCursor=LoadCursorA(NULL,IDC_ARROW);
-    wc.hIcon=LoadIconA(instance,MAKEINTRESOURCEA(1));
+    wc.hIcon=framework_icon(GetSystemMetrics(SM_CXICON),GetSystemMetrics(SM_CYICON));
+    if(!wc.hIcon) wc.hIcon=LoadIconA(instance,MAKEINTRESOURCEA(1));
     if(!TG_REGISTER(&wc)&&GetLastError()!=ERROR_CLASS_ALREADY_EXISTS) return 0;
     HWND hwnd=TG_CREATE(classname,TG_TITLE,WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,
         CW_USEDEFAULT,CW_USEDEFAULT,660,520,NULL,NULL,instance,w);
     if(!hwnd) return 0;
     if(wc.hIcon) {
         SendMessageW(hwnd,WM_SETICON,ICON_BIG,(LPARAM)wc.hIcon);
-        SendMessageW(hwnd,WM_SETICON,ICON_SMALL,(LPARAM)wc.hIcon);
+        HICON small=framework_icon(GetSystemMetrics(SM_CXSMICON),GetSystemMetrics(SM_CYSMICON));
+        SendMessageW(hwnd,WM_SETICON,ICON_SMALL,(LPARAM)(small?small:wc.hIcon));
     }
     {
         char icon_path[32768];

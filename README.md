@@ -71,6 +71,34 @@ cc -x c -std=c99 -Wall -Wextra -Wpedantic -Iinclude \
 
 *(Note: Source files use `.C` / `.H` extensions and are compiled as **C99**, not C++.)*
 
+### Default Windows application icon
+
+New Windows windows use the **TKGPU repository logo** by default, including
+when the runtime is loaded by Python or another host EXE. The icon is embedded
+in the runtime DLL, so it does not depend on an external image or the working
+directory. An application's explicit `wm iconbitmap` / `wm iconphoto` setting
+can replace it; Kerbot Drone continues to use its own product icon.
+
+The CMake-built shell and native demo also embed the logo in their EXE resources,
+so Explorer and the window caption have a project icon. Downstream applications
+can opt in without conflicting with their existing application resources:
+
+```cmake
+add_subdirectory(TKGPU)
+add_executable(my_app main.c)
+target_link_libraries(my_app PRIVATE tkgpu_compat)
+tkgpu_set_application_icon(my_app)
+# Or embed an application's own .ico:
+# tkgpu_set_application_icon(my_app ICON "${CMAKE_CURRENT_SOURCE_DIR}/my-app.ico")
+```
+
+Call the helper once per target. It changes the EXE file icon; set an explicit
+window icon as well if the application's windows should use its own branding.
+The committed `assets/tkgpu-logo.ico` is generated from `assets/tkgpu-logo.svg`
+with transparent, multi-size DIB frames. Regeneration only requires the
+development tools documented in [TKGPUBrandIcon.py](tools/TKGPUBrandIcon.py);
+normal builds do not require Python, Pillow or an SVG renderer for the icon.
+
 ### Optional Reference Conformance Check (Development Only)
 
 If Python and Tcl 8.6 are installed on the development machine (neither is linked into TKGPU):

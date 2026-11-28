@@ -1,0 +1,47 @@
+include_guard(GLOBAL)
+
+# Keep branding opt-in for downstream EXEs: do not collide with an
+# application's own resource ID 1 through a transitive library dependency.
+function(_tkgpu_embed_icon target resource_id icon)
+  if(NOT WIN32)
+    return()
+  endif()
+  if(NOT TARGET "${target}")
+    message(FATAL_ERROR "Unknown TKGPU icon target: ${target}")
+  endif()
+  get_filename_component(TKGPU_ICON_FILE "${icon}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+  if(NOT EXISTS "${TKGPU_ICON_FILE}")
+    message(FATAL_ERROR "Missing TKGPU icon: ${TKGPU_ICON_FILE}")
+  endif()
+  file(TO_CMAKE_PATH "${TKGPU_ICON_FILE}" TKGPU_ICON_FILE)
+  set(TKGPU_ICON_RESOURCE_ID "${resource_id}")
+  set(resource "${CMAKE_CURRENT_BINARY_DIR}/tkgpu-icon-${target}.rc")
+  configure_file("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/TKGPUBranding.rc.in" "${resource}" @ONLY)
+  if(CMAKE_RC_COMPILER MATCHES "windres")
+    # This header-free resource needs no inherited C include directories.
+    # windres can otherwise lose their quoting when the checkout has spaces.
+    set(object "${CMAKE_CURRENT_BINARY_DIR}/tkgpu-icon-${target}.obj")
+    separate_arguments(rc_flags NATIVE_COMMAND "${CMAKE_RC_FLAGS}")
+    if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+      set(format pe-i386)
+    else()
+      set(format pe-x86-64)
+    endif()
+    add_custom_command(OUTPUT "${object}"
+      COMMAND "${CMAKE_RC_COMPILER}" ${rc_flags} --target=${format} -O coff -i "${resource}" -o "${object}"
+      DEPENDS "${resource}" "${TKGPU_ICON_FILE}" VERBATIM)
+    set_source_files_properties("${object}" PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
+    target_sources("${target}" PRIVATE "${object}")
+  else()
+    set_property(SOURCE "${resource}" APPEND PROPERTY OBJECT_DEPENDS "${TKGPU_ICON_FILE}")
+    target_sources("${target}" PRIVATE "${resource}")
+  endif()
+endfunction()
+
+function(tkgpu_set_application_icon target)
+  cmake_parse_arguments(BRAND "" "ICON" "" ${ARGN})
+  if(NOT BRAND_ICON)
+    set(BRAND_ICON "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../assets/tkgpu-logo.ico")
+  endif()
+  _tkgpu_embed_icon("${target}" 1 "${BRAND_ICON}")
+endfunction()

@@ -63,6 +63,7 @@ int WINAPI WinMain(HINSTANCE instance,HINSTANCE previous,LPSTR args,int show) {
     }
     button=tg_ui_find(tg_interp_ui(interp),".bar.ok");
     WNDCLASSA wc={0}; wc.lpfnWndProc=window_proc; wc.hInstance=instance;
+    wc.hIcon=LoadIconA(instance,MAKEINTRESOURCEA(1));
     wc.hCursor=LoadCursorA(NULL,IDC_ARROW); wc.lpszClassName="TKGPU.NativeDemo";
     if(!RegisterClassA(&wc)) { tg_destroy(interp); return 1; }
     HWND hwnd=CreateWindowA(wc.lpszClassName,"TKGPU - independent runtime",

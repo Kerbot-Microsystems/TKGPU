@@ -11,6 +11,9 @@ them.
 
 Keep the applicable full licenses and notices with redistributions containing
 these materials. The development host bundler includes copies in its inventory.
+The standalone native bundle does not require Python helper modules; if a complete
+`bindings/python/tkgpu` helper package is supplied, it is included and recorded
+in the manifest. Partial helper packages are rejected.
 
 Python, X11, Pango/Cairo, platform runtimes and optional fonts may add dependencies
 or redistribution obligations to a particular build. They are not all bundled

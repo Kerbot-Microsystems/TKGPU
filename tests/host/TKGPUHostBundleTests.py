@@ -47,4 +47,17 @@ with tempfile.TemporaryDirectory() as directory:
         pass
     else:
         raise AssertionError("unexpected binary accepted")
+    for name in MODULES:
+        (source / "bindings/python/tkgpu" / name).unlink()
+    native_bundle = root / "native-bundle"
+    build(source, binary, native_bundle, "tkgp.dll")
+    assert verify(native_bundle)["python_bindings"] is False
+    assert (native_bundle / "third_party/unicode/LICENSE.txt").is_file()
+    (source / "bindings/python/tkgpu" / MODULES[0]).write_text("# incomplete\n")
+    try:
+        build(source, binary, root / "incomplete", "tkgp.dll")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("incomplete Python bindings accepted")
 print("Development bundle inventory checks passed")

@@ -13,11 +13,12 @@ NOTICES = ("THIRD_PARTY_NOTICES.md", "third_party/unicode/LICENSE.txt",
            "third_party/zlib/TKGPU-NOTICE.txt")
 
 
-def expected(library):
+def expected(library, python_bindings=True):
     if library not in LIBRARIES:
         raise ValueError("Unsupported bundle library name")
     return {library, "LICENSE.repository.txt", "DEVELOPMENT_AND_DISTRIBUTION.md",
-            "include/TKGPUHost.H"} | set(NOTICES) | {"python/tkgpu/" + name for name in MODULES}
+            "include/TKGPUHost.H"} | set(NOTICES) | (
+                {"python/tkgpu/" + name for name in MODULES} if python_bindings else set())
 
 
 def inventory(root):
@@ -40,7 +41,10 @@ def sha(path):
 
 def verify(root):
     manifest = json.loads((root / MANIFEST).read_text(encoding="utf-8"))
-    wanted = expected(manifest["library"])
+    bindings = manifest.get("python_bindings", True)
+    if not isinstance(bindings, bool):
+        raise ValueError("Invalid Python binding inventory flag")
+    wanted = expected(manifest["library"], bindings)
     if manifest["status"] != "development-only" or manifest["release_authorized"] is not False:
         raise ValueError("Unexpected development manifest status")
     if inventory(root) != wanted | {MANIFEST} or set(manifest["sha256"]) != wanted:
@@ -52,7 +56,11 @@ def verify(root):
 
 
 def build(source, library, root, name):
-    wanted = expected(name)
+    bindings = [source / "bindings/python/tkgpu" / module for module in MODULES]
+    python_bindings = all(path.is_file() for path in bindings)
+    if not python_bindings and any(path.exists() for path in bindings):
+        raise ValueError("Incomplete Python binding inputs")
+    wanted = expected(name, python_bindings)
     if root.is_symlink():
         raise ValueError("Bundle directory may not be a symlink")
     root.mkdir(parents=True, exist_ok=True)
@@ -61,7 +69,8 @@ def build(source, library, root, name):
     mapping = {name: library, "LICENSE.repository.txt": source / "LICENSE",
                "DEVELOPMENT_AND_DISTRIBUTION.md": source / "docs/legal/DEVELOPMENT_AND_DISTRIBUTION.md",
                "include/TKGPUHost.H": source / "include/TKGPUHost.H"}
-    mapping.update({"python/tkgpu/" + module: source / "bindings/python/tkgpu" / module for module in MODULES})
+    if python_bindings:
+        mapping.update({"python/tkgpu/" + module: source / "bindings/python/tkgpu" / module for module in MODULES})
     mapping.update({notice: source / notice for notice in NOTICES})
     for key, origin in mapping.items():
         if not origin.is_file():
@@ -73,6 +82,7 @@ def build(source, library, root, name):
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(origin, dest)
     manifest = {"schema": 1, "status": "development-only", "release_authorized": False,
+                "python_bindings": python_bindings,
                 "library": name, "sha256": {key: sha(root / key) for key in sorted(wanted)},
                 "note": "File inventory only; dependency, provenance and rights review required."}
     (root / MANIFEST).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")

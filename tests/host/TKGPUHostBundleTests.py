@@ -3,7 +3,7 @@ import pathlib
 import sys
 import tempfile
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "tools"))
-from TKGPUHostBundle import build, verify, MODULES
+from TKGPUHostBundle import build, verify, MODULES, NOTICES
 
 with tempfile.TemporaryDirectory() as directory:
     root = pathlib.Path(directory)
@@ -12,16 +12,26 @@ with tempfile.TemporaryDirectory() as directory:
         path = source / "bindings/python/tkgpu" / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("# test\n")
-    for name in ("include/TKGPUHost.H", "docs/legal/DEVELOPMENT_AND_DISTRIBUTION.md"):
+    for name in ("include/TKGPUHost.H", "docs/legal/DEVELOPMENT_AND_DISTRIBUTION.md", *NOTICES):
         path = source / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("test\n")
-    (root / "LICENSE").write_text("test license\n")
+    (root / "LICENSE").write_text("unrelated parent license\n")
+    (source / "LICENSE").write_text("framework test license\n")
     binary = root / "dummy.dll"
     binary.write_bytes(b"test binary")
     bundle = root / "bundle"
     build(source, binary, bundle, "tkgp.dll")
     assert verify(bundle)["release_authorized"] is False
+    assert (bundle / "LICENSE.repository.txt").read_text() == "framework test license\n"
+    (bundle / "third_party/unicode/LICENSE.txt").unlink()
+    try:
+        verify(bundle)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("missing Unicode license accepted")
+    build(source, binary, bundle, "tkgp.dll")
     (bundle / "tkgp.dll").write_bytes(b"changed")
     try:
         verify(bundle)

@@ -8,13 +8,16 @@ import shutil
 MODULES = ("__init__.py", "native.py", "host.py", "dispatch.py", "images.py", "tkinter_adapter.py")
 LIBRARIES = ("tkgp.dll", "libTKGPUCompat.so", "libTKGPUCompat.dylib")
 MANIFEST = "DEVELOPMENT_MANIFEST.json"
+NOTICES = ("THIRD_PARTY_NOTICES.md", "third_party/unicode/LICENSE.txt",
+           "third_party/unicode/README.md", "third_party/zlib/LICENSE",
+           "third_party/zlib/TKGPU-NOTICE.txt")
 
 
 def expected(library):
     if library not in LIBRARIES:
         raise ValueError("Unsupported bundle library name")
     return {library, "LICENSE.repository.txt", "DEVELOPMENT_AND_DISTRIBUTION.md",
-            "include/TKGPUHost.H"} | {"python/tkgpu/" + name for name in MODULES}
+            "include/TKGPUHost.H"} | set(NOTICES) | {"python/tkgpu/" + name for name in MODULES}
 
 
 def inventory(root):
@@ -55,10 +58,11 @@ def build(source, library, root, name):
     root.mkdir(parents=True, exist_ok=True)
     if inventory(root) - (wanted | {MANIFEST}):
         raise ValueError("Bundle contains extra files; use a fresh output directory")
-    mapping = {name: library, "LICENSE.repository.txt": source.parent / "LICENSE",
+    mapping = {name: library, "LICENSE.repository.txt": source / "LICENSE",
                "DEVELOPMENT_AND_DISTRIBUTION.md": source / "docs/legal/DEVELOPMENT_AND_DISTRIBUTION.md",
                "include/TKGPUHost.H": source / "include/TKGPUHost.H"}
     mapping.update({"python/tkgpu/" + module: source / "bindings/python/tkgpu" / module for module in MODULES})
+    mapping.update({notice: source / notice for notice in NOTICES})
     for key, origin in mapping.items():
         if not origin.is_file():
             raise ValueError("Missing bundle input: " + str(origin))

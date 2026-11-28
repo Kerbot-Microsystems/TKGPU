@@ -1,5 +1,6 @@
 /* Generated from Unicode 16.0 general category properties. Not Tcl source.
-   Unicode data terms: https://www.unicode.org/license.txt
+   Unicode data terms: ../../third_party/unicode/LICENSE.txt (Unicode License V3).
+   Upstream: https://www.unicode.org/license.txt
    2088 nonzero ranges; mask stream FNV-1a c58a866e. */
     {0x0,0x8,4},
     {0x9,0xd,516},

@@ -14,6 +14,21 @@
 
 ## Overview
 
+TKGPU is developed and maintained by **Kerbot Microsystems**. It is the UI
+framework used by **Kerbot Drone**, the company's desktop drone design and
+engineering application. The framework is maintained in this standalone
+repository so its runtime, bindings and platform backends can be built and
+examined independently of the product.
+
+Kerbot Drone uses TKGPU for its desktop interface, component workspace, Canvas
+editing, dialogs and extension windows in its modern Windows and Linux builds.
+The legacy Windows XP edition retains stock Tkinter. An application's use of
+the framework does not mean that every Tcl/Tk application or every target OS is
+fully compatible.
+
+Read [About the project](docs/PROJECT.md) for the product relationship,
+platform scope, contribution process and public development priorities.
+
 TKGPU provides:
 
 - **Portable C99 Core:** An original Tcl-subset interpreter, reference-counted object/list/expression engine, UTF-8 text primitives, and monotonic timer notifier (`Tcl_CreateTimerHandler`, `Tcl_DoOneEvent` timer subset, `vwait`/`tkwait`).
@@ -93,13 +108,20 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) and [RELEASE.md](RELEASE.md) for internal
 
 ## License & Third-Party Notices
 
-All original TKGPU source files, headers, tests, and documentation are governed by the repository's license terms. See [docs/legal/DEVELOPMENT_AND_DISTRIBUTION.md](docs/legal/DEVELOPMENT_AND_DISTRIBUTION.md) for distribution due-diligence requirements.
+Original TKGPU code is available under the [MIT License](LICENSE). Existing
+author and third-party copyright notices are retained. Kerbot Drone is a
+separate product with its own distribution and licensing terms; TKGPU's MIT
+license does not grant rights to that application's code, artwork or branding.
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for bundled notices and
+[docs/legal/DEVELOPMENT_AND_DISTRIBUTION.md](docs/legal/DEVELOPMENT_AND_DISTRIBUTION.md)
+for distribution review guidance.
 
 ### Bundled Third-Party Software
 
 | Component | Version | License | Location & Notice |
 | :--- | :--- | :--- | :--- |
 | **zlib** (unmodified subset, `Z_SOLO`) | 1.3.1 | [zlib License](third_party/zlib/LICENSE) | `third_party/zlib/` — Copyright (C) 1995–2022 Jean-loup Gailly and Mark Adler. See [TKGPU-NOTICE.txt](third_party/zlib/TKGPU-NOTICE.txt). |
+| **Unicode Character Database-derived tables** | Unicode 16.0 | [Unicode License V3](third_party/unicode/LICENSE.txt) | General-category and simple case-mapping tables in `src/compat/TKGPUUnicodeClasses.H` and `src/compat/TKGPUUnicodeCase.H`. See [provenance](third_party/unicode/README.md). |
 
 ### External / Optional System & Development Dependencies (Not Bundled)
 

@@ -1,5 +1,10 @@
 # Release gates
 
+For current project identity, Kerbot Drone integration and platform scope, see
+[About TKGPU](docs/PROJECT.md). The dated preview plans below are historical
+qualification notes, not a current statement that Kerbot Drone does not use
+TKGPU, nor a guarantee of complete Tcl/Tk or cross-platform compatibility.
+
 ## December 1, 2026: experimental developer preview target
 
 The preview is a standalone C runtime, not a replacement DLL for Tcl/Tk or a production Kerbot Drone GUI. Do not modify or enable the main application's existing Tcl/Tk integration.

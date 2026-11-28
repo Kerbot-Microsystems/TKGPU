@@ -21,6 +21,8 @@ not approved commercial releases.
 
 | Component | Role | Distribution consideration |
 | --- | --- | --- |
+| Unicode Character Database 16.0.0 | Generated category and simple case tables | Preserve the full Unicode License V3 notice in `third_party/unicode/LICENSE.txt`; see `THIRD_PARTY_NOTICES.md` |
+| zlib 1.3.1 | Bundled compression subset | Preserve `third_party/zlib/LICENSE` and `third_party/zlib/TKGPU-NOTICE.txt` |
 | CPython / tkinter | External Python API/runtime | PSF and associated notices; include full applicable license and a change summary if distributing modified Python |
 | Tcl/Tk | Optional reference tests and old staged bridge | Retain upstream notices and full applicable terms for any distributed portions; direct host does not require the original Tcl/Tk binaries |
 | Pillow and image codecs | Optional external image decoding | Review Pillow and actual codec/binary dependencies; preserve notices |

@@ -1,5 +1,6 @@
 /* Generated Unicode 16.0 simple case mappings; not Tcl source.
-   Unicode data terms: https://www.unicode.org/license.txt
+   Unicode data terms: ../../third_party/unicode/LICENSE.txt (Unicode License V3).
+   Upstream: https://www.unicode.org/license.txt
    1338 ranges; mapping stream FNV-1a 6ed31d5f. */
     {65,90,{32,0,0}},
     {97,122,{0,-32,-32}},
